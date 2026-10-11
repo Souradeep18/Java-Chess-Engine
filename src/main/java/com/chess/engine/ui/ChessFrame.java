@@ -41,6 +41,18 @@ public class ChessFrame extends JFrame {
     private final JButton newGameButton;
     private final JButton loadFenButton;
     private final JButton engineButton;
+
+    // Evaluation: toggle next to "Engine Move", bar beside the board, and the best lines
+    private final JToggleButton analysisToggle;
+    private final JPanel analysisPanel;
+    private final JLabel analysisEvalLabel;
+    private final JLabel analysisDepthLabel;
+    private final JLabel[] analysisScoreLabels = new JLabel[3];
+    private final JLabel[] analysisMoveLabels = new JLabel[3];
+    private final EvalBar evalBar;
+    private ChessEngine analysisEngine;
+    private SwingWorker<Void, AnalysisSnapshot> analysisWorker;
+    private int analysisGeneration = 0;
     private final JButton flipButton;
     private final JButton coordinatesButton;
     private final JButton tourButton;
@@ -214,12 +226,73 @@ public class ChessFrame extends JFrame {
         gameSection.add(Box.createVerticalStrut(6));
         gameSection.add(loadFenButton);
         gameSection.add(Box.createVerticalStrut(6));
-        gameSection.add(engineButton);
+
+        // "Engine Move" is a little narrower to make room for the evaluation toggle
+        analysisToggle = new JToggleButton("📊");
+        analysisToggle.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 16));
+        analysisToggle.setFocusable(false);
+        analysisToggle.setPreferredSize(new Dimension(48, 38));
+        analysisToggle.setToolTipText("Evaluation bar and the engine's 3 best lines");
+
+        JPanel engineRow = new JPanel(new BorderLayout(4, 0));
+        engineRow.setOpaque(false);
+        engineRow.setMaximumSize(controlSize);
+        engineRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        engineRow.add(engineButton, BorderLayout.CENTER);
+        engineRow.add(analysisToggle, BorderLayout.EAST);
+        gameSection.add(engineRow);
         sidePanel.add(gameSection);
+
+        // Evaluation + the three best lines (only visible while the toggle is on)
+        analysisPanel = new JPanel();
+        analysisPanel.setLayout(new BoxLayout(analysisPanel, BoxLayout.Y_AXIS));
+        analysisPanel.setOpaque(false);
+        analysisPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        analysisPanel.setBorder(new EmptyBorder(10, 0, 0, 0));
+
+        analysisEvalLabel = new JLabel("0.0");
+        analysisEvalLabel.setFont(new Font("SansSerif", Font.BOLD, 22));
+        analysisDepthLabel = new JLabel(" ");
+        analysisDepthLabel.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        analysisDepthLabel.setForeground(new Color(110, 110, 110));
+
+        JPanel evalHeader = new JPanel(new BorderLayout(10, 0));
+        evalHeader.setOpaque(false);
+        evalHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+        evalHeader.setPreferredSize(new Dimension(10, 34));
+        evalHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        evalHeader.add(analysisEvalLabel, BorderLayout.WEST);
+        evalHeader.add(analysisDepthLabel, BorderLayout.CENTER);
+        analysisPanel.add(evalHeader);
+        analysisPanel.add(Box.createVerticalStrut(4));
+
+        for (int i = 0; i < 3; i++) {
+            analysisScoreLabels[i] = new JLabel(" ", SwingConstants.CENTER);
+            analysisScoreLabels[i].setFont(new Font("SansSerif", Font.BOLD, 13));
+            analysisScoreLabels[i].setPreferredSize(new Dimension(56, 22));
+
+            analysisMoveLabels[i] = new JLabel(" ");
+            analysisMoveLabels[i].setFont(new Font("SansSerif", Font.PLAIN, 13));
+
+            JPanel row = new JPanel(new BorderLayout(8, 0));
+            row.setOpaque(false);
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+            // a small preferred width keeps long lines from widening the side panel (they end in "...")
+            row.setPreferredSize(new Dimension(10, 28));
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            row.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
+            row.add(analysisScoreLabels[i], BorderLayout.WEST);
+            row.add(analysisMoveLabels[i], BorderLayout.CENTER);
+            analysisPanel.add(row);
+        }
+
+        analysisPanel.setVisible(false);
+        sidePanel.add(analysisPanel);
 
         newGameButton.addActionListener(e -> startNewGame());
         loadFenButton.addActionListener(e -> loadFEN());
         engineButton.addActionListener(e -> makeEngineMove());
+        analysisToggle.addActionListener(e -> refreshAnalysis());
 
         sidePanel.add(Box.createVerticalStrut(14));
 
@@ -389,7 +462,22 @@ public class ChessFrame extends JFrame {
         bottomPalettePanel.setVisible(false);
 
         JPanel boardCenterPanel = new JPanel(new GridBagLayout());
-        boardCenterPanel.add(boardPanel);
+
+        // Evaluation bar on the left of the board (hidden until the toggle is switched on)
+        evalBar = new EvalBar();
+        evalBar.setVisible(false);
+
+        GridBagConstraints barConstraints = new GridBagConstraints();
+        barConstraints.gridx = 0;
+        barConstraints.gridy = 0;
+        barConstraints.fill = GridBagConstraints.VERTICAL;
+        barConstraints.insets = new Insets(0, 0, 0, 8);
+        boardCenterPanel.add(evalBar, barConstraints);
+
+        GridBagConstraints boardConstraints = new GridBagConstraints();
+        boardConstraints.gridx = 1;
+        boardConstraints.gridy = 0;
+        boardCenterPanel.add(boardPanel, boardConstraints);
 
         boardContainer.add(topPalettePanel, BorderLayout.NORTH);
         boardContainer.add(boardCenterPanel, BorderLayout.CENTER);
@@ -648,6 +736,7 @@ public class ChessFrame extends JFrame {
     // --- Board Editor Operations ---
     private void enterEditorMode() {
         isEditorMode = true;
+        refreshAnalysis();   // hides the evaluation while the board is being edited
 
         topPalettePanel.setVisible(true);
         bottomPalettePanel.setVisible(true);
@@ -984,8 +1073,251 @@ public class ChessFrame extends JFrame {
     private void toggleBoardOrientation() {
         isFlipped = !isFlipped;
         boardPanel.setFlipped(isFlipped);
+        evalBar.setFlipped(isFlipped);
         updateCheckBoxes();
         boardPanel.repaint();
+    }
+
+    // ---------------- Evaluation bar & best lines ----------------
+
+    private static final class AnalysisSnapshot {
+        final int depth;
+        final List<ChessEngine.AnalysisLine> lines;
+
+        AnalysisSnapshot(int depth, List<ChessEngine.AnalysisLine> lines) {
+            this.depth = depth;
+            this.lines = lines;
+        }
+    }
+
+    private void stopAnalysis() {
+        analysisGeneration++;
+
+        if (analysisEngine != null) {
+            analysisEngine.cancel();
+            analysisEngine = null;
+        }
+        if (analysisWorker != null) {
+            analysisWorker.cancel(false);
+            analysisWorker = null;
+        }
+    }
+
+    /**
+     * Called whenever the shown position changes (and when the toggle is clicked):
+     * hides everything when the toggle is off, otherwise starts a fresh analysis.
+     */
+    private void refreshAnalysis() {
+        stopAnalysis();
+
+        boolean show = analysisToggle.isSelected() && !isEditorMode && currentNode != null;
+        analysisPanel.setVisible(show);
+        evalBar.setVisible(show);
+
+        if (!show) {
+            return;
+        }
+
+        Board position = currentNode.board.copy();
+        int result = gameResult(position);
+
+        if (result != 0) {
+            showFinishedPosition(result);
+            return;
+        }
+
+        analysisDepthLabel.setText("analysing...");
+        startAnalysis(position);
+    }
+
+    private void startAnalysis(Board position) {
+        final Board uiBoard = position.copy();     // used on the EDT to write the moves
+        final ChessEngine analysing = new ChessEngine();
+        final int generation = analysisGeneration;
+
+        analysisEngine = analysing;
+
+        SwingWorker<Void, AnalysisSnapshot> worker = new SwingWorker<Void, AnalysisSnapshot>() {
+            @Override
+            protected Void doInBackground() {
+                analysing.analyse(position, 3, 24, 6000,
+                        (depth, lines) -> publish(new AnalysisSnapshot(depth, lines)));
+                return null;
+            }
+
+            @Override
+            protected void process(List<AnalysisSnapshot> chunks) {
+                if (generation != analysisGeneration || chunks.isEmpty()) {
+                    return;
+                }
+                applyAnalysis(uiBoard, chunks.get(chunks.size() - 1));
+            }
+        };
+
+        analysisWorker = worker;
+        worker.execute();
+    }
+
+    private void applyAnalysis(Board position, AnalysisSnapshot snapshot) {
+        List<ChessEngine.AnalysisLine> lines = snapshot.lines;
+
+        for (int i = 0; i < analysisScoreLabels.length; i++) {
+            JLabel score = analysisScoreLabels[i];
+            JLabel moves = analysisMoveLabels[i];
+
+            if (i < lines.size()) {
+                ChessEngine.AnalysisLine line = lines.get(i);
+                String text = pvToText(position, line.pv);
+
+                score.setText(formatEval(line));
+                styleScoreLabel(score, line.mateIn > 0 || (line.mateIn == 0 && line.scoreCp >= 0));
+                moves.setText(text);
+                moves.setToolTipText(text);
+            } else {
+                clearAnalysisRow(i);
+            }
+        }
+
+        if (!lines.isEmpty()) {
+            ChessEngine.AnalysisLine best = lines.get(0);
+            String text = formatEval(best);
+
+            analysisEvalLabel.setText(text);
+            evalBar.setEvaluation(evalShare(best), text);
+        }
+
+        analysisDepthLabel.setText("Depth " + snapshot.depth);
+    }
+
+    private void showFinishedPosition(int result) {
+        for (int i = 0; i < analysisScoreLabels.length; i++) {
+            clearAnalysisRow(i);
+        }
+
+        if (result == 2) {
+            analysisEvalLabel.setText("0.0");
+            analysisDepthLabel.setText("Draw");
+            evalBar.setEvaluation(0.5, "0.0");
+        } else {
+            analysisEvalLabel.setText("-");
+            analysisDepthLabel.setText(result > 0 ? "Game over - White wins" : "Game over - Black wins");
+            evalBar.setEvaluation(result > 0 ? 1.0 : 0.0, "-");
+        }
+    }
+
+    private void clearAnalysisRow(int row) {
+        analysisScoreLabels[row].setText(" ");
+        analysisScoreLabels[row].setOpaque(false);
+        analysisScoreLabels[row].setBorder(null);
+        analysisMoveLabels[row].setText(" ");
+        analysisMoveLabels[row].setToolTipText(null);
+    }
+
+    private void styleScoreLabel(JLabel label, boolean whiteBetter) {
+        label.setOpaque(true);
+        label.setBackground(whiteBetter ? new Color(250, 250, 250) : new Color(70, 70, 70));
+        label.setForeground(whiteBetter ? new Color(30, 30, 30) : new Color(245, 245, 245));
+        label.setBorder(BorderFactory.createLineBorder(new Color(150, 150, 150)));
+    }
+
+    /** +1.3 / -0.4 / 0.0 in pawns, or +M5 / -M5 when a forced mate has been found. */
+    private String formatEval(ChessEngine.AnalysisLine line) {
+        if (line.mateIn != 0) {
+            return (line.mateIn > 0 ? "+M" : "-M") + Math.abs(line.mateIn);
+        }
+
+        double pawns = Math.max(-99.9, Math.min(99.9, line.scoreCp / 100.0));
+
+        if (Math.round(pawns * 10) == 0) {
+            return "0.0";
+        }
+
+        return String.format(java.util.Locale.ROOT, "%+.1f", pawns);
+    }
+
+    /** Share of the bar that is white: 0.5 = equal, 1.0 = White is winning. */
+    private double evalShare(ChessEngine.AnalysisLine line) {
+        if (line.mateIn > 0) {
+            return 1.0;
+        }
+        if (line.mateIn < 0) {
+            return 0.0;
+        }
+        return 1.0 / (1.0 + Math.exp(-0.00368208 * line.scoreCp));
+    }
+
+    /** The expected continuation written like the move list: "2. Nf3 d5 3. d4 ...". */
+    private String pvToText(Board start, List<Move> pv) {
+        StringBuilder sb = new StringBuilder();
+        Board current = start.copy();
+
+        int fullMove = currentNode.ply / 2 + 1;
+        boolean whiteMoves = current.isWhiteToMove();
+        boolean first = true;
+
+        try {
+            for (Move move : pv) {
+                Board before = current.copy();
+                MoveGenerator.makeMove(current, move);
+
+                String san = createNotation(before, current, move,
+                        before.getWhiteChecks(), before.getBlackChecks());
+
+                if (whiteMoves) {
+                    sb.append(fullMove).append(". ");
+                } else if (first) {
+                    sb.append(fullMove).append("... ");
+                }
+
+                sb.append(san).append(' ');
+
+                if (!whiteMoves) {
+                    fullMove++;
+                }
+                whiteMoves = !whiteMoves;
+                first = false;
+            }
+        } catch (RuntimeException ex) {
+            // keep whatever could be written
+        }
+
+        return sb.toString().trim();
+    }
+
+    /** 0 = still being played, 1 = White has won, -1 = Black has won, 2 = drawn. */
+    private int gameResult(Board board) {
+        boolean whiteToMove = board.isWhiteToMove();
+
+        if (board.isAtomic()) {
+            if (AtomicChess.hasLostKing(board, true)) return -1;
+            if (AtomicChess.hasLostKing(board, false)) return 1;
+        }
+
+        if (board.isThreeCheck()) {
+            if (board.getWhiteChecks() >= 3) return 1;
+            if (board.getBlackChecks() >= 3) return -1;
+        }
+
+        if (board.isAntiChess()) {
+            if (AntiChess.hasNoPieces(board, true)) return 1;
+            if (AntiChess.hasNoPieces(board, false)) return -1;
+        }
+
+        if (!MoveGenerator.generateLegalMoves(board).isEmpty()) {
+            return 0;
+        }
+
+        if (board.isAntiChess()) {
+            return whiteToMove ? 1 : -1;      // no moves left means the side to move wins
+        }
+        if (board.isHorde() && HordeChess.whiteHasNoPieces(board)) {
+            return -1;
+        }
+        if (isKingInCheck(board, whiteToMove)) {
+            return whiteToMove ? -1 : 1;      // checkmate
+        }
+
+        return 2;                              // stalemate
     }
 
     // --- Three-Check boxes ---
@@ -1404,6 +1736,7 @@ public class ChessFrame extends JFrame {
         updateStatus();
         updateNotationDisplay();
         updateNavigationButtons();
+        refreshAnalysis();
     }
 
     private void goBack() {

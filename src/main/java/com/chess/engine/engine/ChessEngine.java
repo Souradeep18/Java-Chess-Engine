@@ -408,8 +408,176 @@ public class ChessEngine {
         return score * perspective;
     }
 
+    // =====================================================================
+    //  Multi-line analysis (evaluation bar and "best lines" panel)
+    // =====================================================================
+
+    /** One candidate line: its score from White's point of view and the moves it expects. */
+    public static final class AnalysisLine {
+        /** Centipawns from White's point of view (only meaningful when mateIn == 0). */
+        public final int scoreCp;
+        /** 0 = no forced mate, +N = White mates in N moves, -N = Black mates in N moves. */
+        public final int mateIn;
+        public final List<Move> pv;
+
+        AnalysisLine(int scoreCp, int mateIn, List<Move> pv) {
+            this.scoreCp = scoreCp;
+            this.mateIn = mateIn;
+            this.pv = pv;
+        }
+    }
+
+    public interface AnalysisListener {
+        /** Called from the analysing thread each time a whole search depth is finished. */
+        void onDepthCompleted(int depth, List<AnalysisLine> lines);
+    }
+
+    private static final class Scored {
+        final Move move;
+        final int score;
+
+        Scored(Move move, int score) {
+            this.move = move;
+            this.score = score;
+        }
+    }
+
+    private volatile boolean cancelled = false;
+
+    /** Stops a running analyse() as soon as possible (safe to call from another thread). */
+    public void cancel() {
+        cancelled = true;
+    }
+
+    /**
+     * Searches the position deeper and deeper and reports the best {@code numLines} moves
+     * (with their expected continuation) after every finished depth.
+     */
+    public void analyse(Board position, int numLines, int maxDepth, long timeLimitMillis, AnalysisListener listener) {
+        this.startTime = System.currentTimeMillis();
+        this.maxTimeMillis = timeLimitMillis;
+        this.timeUp = false;
+
+        clearKillerMoves();
+        transpositionTable.clear();
+
+        Board board = position.copy();
+        List<Move> rootMoves = board.generateLegalMoves();
+        if (rootMoves.isEmpty()) {
+            return;
+        }
+
+        boolean whiteToMove = board.isWhiteToMove();
+        Map<Move, Integer> previous = new HashMap<>();
+
+        for (int depth = 1; depth <= maxDepth; depth++) {
+            // best moves of the last depth first, so the cut-offs come early
+            final Map<Move, Integer> order = previous;
+            rootMoves.sort((a, b) -> Integer.compare(
+                    order.getOrDefault(b, -INFINITY), order.getOrDefault(a, -INFINITY)));
+
+            List<Scored> top = new ArrayList<>();
+            Map<Move, Integer> current = new HashMap<>();
+            boolean aborted = false;
+
+            for (Move move : rootMoves) {
+                // a move only matters if it beats the worst of the lines we already have
+                int alpha = top.size() < numLines ? -INFINITY : top.get(top.size() - 1).score;
+
+                board.makeMove(move);
+                int score = -alphaBeta(board, depth - 1, 1, -INFINITY, -alpha, true);
+                board.undoMove(move);
+
+                if (timeUp) {
+                    aborted = true;
+                    break;
+                }
+
+                current.put(move, score);
+
+                if (top.size() < numLines || score > alpha) {
+                    top.add(new Scored(move, score));
+                    top.sort((a, b) -> Integer.compare(b.score, a.score));
+                    if (top.size() > numLines) {
+                        top.remove(top.size() - 1);
+                    }
+                }
+            }
+
+            if (aborted) {
+                return; // keep the result of the last finished depth
+            }
+
+            previous = current;
+
+            List<AnalysisLine> lines = new ArrayList<>();
+            for (Scored s : top) {
+                lines.add(toAnalysisLine(s.score, whiteToMove, extractPrincipalVariation(board, s.move)));
+            }
+            listener.onDepthCompleted(depth, lines);
+
+            // a forced mate has been found: searching deeper cannot improve the best line
+            if (Math.abs(top.get(0).score) > CHECKMATE_SCORE - 200) {
+                return;
+            }
+        }
+    }
+
+    private AnalysisLine toAnalysisLine(int score, boolean whiteToMove, List<Move> pv) {
+        int whiteScore = whiteToMove ? score : -score;
+
+        if (Math.abs(score) > CHECKMATE_SCORE - 200) {
+            int plies = CHECKMATE_SCORE - Math.abs(score);
+            int moves = Math.max(1, (plies + 1) / 2);
+            return new AnalysisLine(whiteScore, whiteScore > 0 ? moves : -moves, pv);
+        }
+
+        return new AnalysisLine(whiteScore, 0, pv);
+    }
+
+    /** The first move followed by the moves the transposition table remembers as best. */
+    private List<Move> extractPrincipalVariation(Board board, Move first) {
+        List<Move> pv = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+
+        board.makeMove(first);
+        pv.add(first);
+
+        for (int i = 0; i < 9; i++) {
+            long key = board.getZobristKey();
+            if (!seen.add(key)) {
+                break;
+            }
+
+            TTEntry entry = transpositionTable.get(key);
+            if (entry == null || entry.bestMove == null) {
+                break;
+            }
+
+            Move next = null;
+            for (Move candidate : board.generateLegalMoves()) {
+                if (candidate.equals(entry.bestMove)) {
+                    next = candidate;
+                    break;
+                }
+            }
+            if (next == null) {
+                break;
+            }
+
+            board.makeMove(next);
+            pv.add(next);
+        }
+
+        for (int i = pv.size() - 1; i >= 0; i--) {
+            board.undoMove(pv.get(i));
+        }
+
+        return pv;
+    }
+
     private boolean checkTimeout() {
-        if (!timeUp && (System.currentTimeMillis() - startTime >= maxTimeMillis)) {
+        if (!timeUp && (cancelled || System.currentTimeMillis() - startTime >= maxTimeMillis)) {
             timeUp = true;
         }
         return timeUp;
@@ -590,6 +758,13 @@ public class ChessEngine {
             material += p > 0 ? v : -v;
         }
 
+        // Horde chess: White has no king, so the normal evaluation cannot be used. Plain material
+        // would make Black (a full army) look clearly better than 36 pawns, so it has its own rules.
+        if (board.isHorde() && k0 == 0 && k1 == 1) {
+            side = board.isWhiteToMove() ? 0 : 1;
+            return hordeEvaluate();
+        }
+
         // positions without exactly one king each (board editor) get plain material
         if (k0 != 1 || k1 != 1) {
             return material;
@@ -602,6 +777,37 @@ public class ChessEngine {
                 | (board.canBlackCastleQueenSide() ? 8 : 0);
 
         return evaluate();
+    }
+
+    // A horde pawn is worth a little more than a normal pawn: together they are stronger than
+    // their count suggests, which gives White a small edge in the starting position.
+    private static final int HORDE_PAWN = 107;
+
+    /** Static evaluation for Horde chess (White = the pawn horde, no king), positive = good for White. */
+    private int hordeEvaluate() {
+        int score = 0;
+
+        for (int s = 0; s < 64; s++) {
+            int p = sq[s];
+            if (p == 0) continue;
+
+            int t = Math.abs(p);
+            int rank = s >> 3;
+
+            if (p > 0) {
+                if (t == P) {
+                    // pawns are worth more the nearer they are to promotion
+                    score += HORDE_PAWN + 3 * rank + (rank >= 5 ? (rank - 4) * 20 : 0);
+                } else {
+                    score += VALUE[t] + PST[t][s ^ 56];
+                }
+            } else if (t != K) {
+                score -= VALUE[t] + PST[t][s];
+            }
+        }
+
+        score += side == 0 ? 10 : -10;
+        return score;
     }
 
     private static int chebyshev(int a, int b) {
