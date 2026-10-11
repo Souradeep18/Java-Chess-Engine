@@ -24,10 +24,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/*
- Main application frame for the Java Chess Engine.
- Features recursive variation trees, PGN HTML notation display,
- material score tracking, engine search, and a full Board Editor mode.
+/**
+ * Main application frame for the Java Chess Engine.
+ * Features recursive variation trees, PGN HTML notation display,
+ * material score tracking, engine search, and a full Board Editor mode.
  */
 @SuppressWarnings("serial")
 public class ChessFrame extends JFrame {
@@ -42,6 +42,7 @@ public class ChessFrame extends JFrame {
     private final JButton loadFenButton;
     private final JButton engineButton;
     private final JButton flipButton;
+    private final JButton coordinatesButton;
     private final JButton tourButton;
 
     // Board editor: variant chooser (replaces the GAME section while editing)
@@ -409,6 +410,13 @@ public class ChessFrame extends JFrame {
         flipButton.setFocusable(false);
         flipButton.setToolTipText("Reverse Board Orientation");
 
+        // Toggles the a-h / 1-8 coordinates around the board
+        coordinatesButton = new JButton("a1");
+        coordinatesButton.setFont(new Font("SansSerif", Font.BOLD, 16));
+        coordinatesButton.setFocusable(false);
+        coordinatesButton.setToolTipText("Show / hide board coordinates");
+
+        actionButtonsPanel.add(coordinatesButton);
         actionButtonsPanel.add(boardEditorButton);
         actionButtonsPanel.add(flipButton);
 
@@ -417,6 +425,7 @@ public class ChessFrame extends JFrame {
 
         boardEditorButton.addActionListener(e -> enterEditorMode());
         flipButton.addActionListener(e -> toggleBoardOrientation());
+        coordinatesButton.addActionListener(e -> boardPanel.setShowCoordinates(!boardPanel.isShowCoordinates()));
 
         // Knight's tour button: top-right of the board area
         tourButton = new JButton("🐎");
@@ -951,7 +960,7 @@ public class ChessFrame extends JFrame {
         flipButton.setEnabled(enabled);
     }
 
-    // Knight's Tour
+    // --- Knight's Tour ---
     private void toggleKnightsTour() {
         if (knightsTour.isActive()) {
             knightsTour.cancel();
@@ -997,11 +1006,11 @@ public class ChessFrame extends JFrame {
 
     private void fillCheckMarks(JLabel[] marks, int checks) {
         for (int i = 0; i < marks.length; i++) {
-            marks[i].setText(i < checks ? "<html><font color='red'>X</font></html>" : "➕");
+            marks[i].setText(i < checks ? "❌" : "➕");
         }
     }
 
-    /*
+    /**
      * Shows the two boxes only in Three-Check (outside the editor). Each check a colour
      * has given turns the next "➕" (left to right) into a "❌". The box at the bottom
      * belongs to the colour at the bottom of the board, so they swap when the board is flipped.
@@ -1104,7 +1113,7 @@ public class ChessFrame extends JFrame {
         // Clone board state off-thread to prevent UI mutation conflicts
         Board searchBoard = currentNode.board.copy();
 
-        //SwingWorker to keep UI responsive and prevent EDT freezing
+        // SwingWorker to keep UI responsive and prevent EDT freezing
         SwingWorker<Move, Void> worker = new SwingWorker<Move, Void>() {
             @Override
             protected Move doInBackground() throws Exception {
@@ -1249,9 +1258,10 @@ public class ChessFrame extends JFrame {
         return MoveGenerator.isSquareAttacked(board, kingSquare, !isWhite);
     }
 
-    /*
-     disambiguation for pieces of the same type that can legally reach the same square
-     (knights, bishops, rooks, queens): the file if it is enough, else the rank, else both.
+    /**
+     * Standard disambiguation for pieces of the same type that can legally reach the same square
+     * (knights, bishops, rooks, queens): the file if it is enough, else the rank, else both.
+     * Kings never need it, and pawn captures already carry their file.
      */
     private String disambiguation(Board before, Move move) {
         char piece = before.getPiece(move.from);
@@ -1324,7 +1334,7 @@ public class ChessFrame extends JFrame {
             sb.append('=').append(Character.toUpperCase(move.promotion));
         }
 
-        // Variant Game Ending Notation Checks
+        // --- Variant Game Ending Notation Checks ---
 
         if (after.isHorde() && HordeChess.whiteHasNoPieces(after)) {
             sb.append('#'); // Black takes all pieces from white in horde variation
@@ -1713,11 +1723,11 @@ public class ChessFrame extends JFrame {
         return false;
     }
 
-    // ---------------- Draw rules (50-move rule, threefold repetition) ----------------
+    // Draw rules (50-move rule, threefold repetition)
 
-    /**
-     * A move is irreversible if it is a pawn move or a capture. After one,
-     * no earlier position can ever occur again.
+    /*
+      A move is irreversible if it is a pawn move or a capture. After one,
+      no earlier position can ever occur again.
      */
     private boolean isIrreversibleMove(MoveNode node) {
         if (node == null || node.parent == null || node.move == null) {
@@ -1752,9 +1762,9 @@ public class ChessFrame extends JFrame {
     }
 
     /*
-     Threefold repetition: the current position (same pieces, same side to
+      Threefold repetition: the current position (same pieces, same side to
      move, same castling rights, same en passant possibilities) has occurred
-      at least three times in the line leading here, consecutively or not.
+     at least three times in the line leading here, consecutively or not.
      */
     private boolean isThreefoldRepetition(MoveNode current) {
         String key = positionKey(current.board);

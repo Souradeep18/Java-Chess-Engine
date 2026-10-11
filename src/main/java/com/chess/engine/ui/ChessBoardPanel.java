@@ -51,6 +51,9 @@ public class ChessBoardPanel extends JPanel {
 
     private boolean isFlipped = false;
 
+    // a-h along the bottom edge and 1-8 along the right edge (follows the board orientation)
+    private boolean showCoordinates = true;
+
     // Guard flag to prevent double-processing during modal dialogs
     private boolean isProcessingClick = false;
 
@@ -139,6 +142,35 @@ public class ChessBoardPanel extends JPanel {
         return isFlipped;
     }
 
+    public void setShowCoordinates(boolean show) {
+        this.showCoordinates = show;
+        updateCoordinateLabels();
+        repaint();
+    }
+
+    public boolean isShowCoordinates() {
+        return showCoordinates;
+    }
+
+    /*
+      Only the squares on the bottom row get a file letter and only the squares on the
+      right-hand column get a rank number, whichever way the board is turned.
+     */
+    private void updateCoordinateLabels() {
+        for (int square = 0; square < 64; square++) {
+            int file = square % 8;
+            int rank = square / 8;
+
+            int bottomRank = isFlipped ? 7 : 0;
+            int rightFile = isFlipped ? 0 : 7;
+
+            SquareButton button = squares[square];
+            button.fileLabel = (showCoordinates && rank == bottomRank) ? String.valueOf((char) ('a' + file)) : null;
+            button.rankLabel = (showCoordinates && file == rightFile) ? String.valueOf(rank + 1) : null;
+            button.darkSquare = (rank + file) % 2 == 0;
+        }
+    }
+
     private void createBoard() {
 
         for (int square = 0; square < 64; square++) {
@@ -196,6 +228,8 @@ public class ChessBoardPanel extends JPanel {
                 }
             }
         }
+
+        updateCoordinateLabels();
 
         revalidate();
         repaint();
@@ -800,6 +834,10 @@ public class ChessBoardPanel extends JPanel {
 
         ChessBoardPanel owner;
 
+        String fileLabel;
+        String rankLabel;
+        boolean darkSquare;
+
         public void setLegalMoveDot(boolean legalMoveDot) {
             this.legalMoveDot = legalMoveDot;
         }
@@ -818,6 +856,23 @@ public class ChessBoardPanel extends JPanel {
                 overlay.translate(-getX(), -getY());
                 owner.paintOverlay(overlay);
                 overlay.dispose();
+            }
+
+            if (fileLabel != null || rankLabel != null) {
+                Graphics2D text = (Graphics2D) g.create();
+                text.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                text.setFont(new Font("SansSerif", Font.BOLD, 13));
+                text.setColor(darkSquare ? LIGHT_SQUARE : DARK_SQUARE);
+
+                FontMetrics fm = text.getFontMetrics();
+
+                if (fileLabel != null) {
+                    text.drawString(fileLabel, 4, getHeight() - 4);
+                }
+                if (rankLabel != null) {
+                    text.drawString(rankLabel, getWidth() - fm.stringWidth(rankLabel) - 4, fm.getAscent() + 2);
+                }
+                text.dispose();
             }
 
             if (legalMoveDot || legalCaptureRing) {
