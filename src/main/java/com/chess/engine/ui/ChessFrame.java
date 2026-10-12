@@ -48,7 +48,9 @@ public class ChessFrame extends JFrame {
     private final JLabel analysisEvalLabel;
     private final JLabel analysisDepthLabel;
     private final JLabel[] analysisScoreLabels = new JLabel[3];
-    private final JLabel[] analysisMoveLabels = new JLabel[3];
+    private final PvLinePanel[] analysisMovePanels = new PvLinePanel[3];
+    private MoveNode analysisAnchor;          // the position the shown lines belong to
+    private MiniBoardPopup miniBoard;         // preview shown while hovering a move of a line
     private final EvalBar evalBar;
     private ChessEngine analysisEngine;
     private SwingWorker<Void, AnalysisSnapshot> analysisWorker;
@@ -122,9 +124,7 @@ public class ChessFrame extends JFrame {
     private final Map<String, MoveNode> nodeMap = new HashMap<>();
     private int nodeCounter = 0;
 
-    /**
-     * Constructs the main chess frame and initializes all UI components.
-     */
+    // Constructs the main chess frame and initializes all UI components.
     public ChessFrame() {
         super("Java Chess Engine");
 
@@ -158,7 +158,7 @@ public class ChessFrame extends JFrame {
         );
         sidePanel.setLayout(new BoxLayout(sidePanel, BoxLayout.Y_AXIS));
 
-        // --- Editor Actions Panel ---
+        // Editor Actions Panel
         JPanel editorControlsPanel = new JPanel(new GridLayout(3, 1, 0, 6));
         editorControlsPanel.setOpaque(false);
         editorControlsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -271,8 +271,8 @@ public class ChessFrame extends JFrame {
             analysisScoreLabels[i].setFont(new Font("SansSerif", Font.BOLD, 13));
             analysisScoreLabels[i].setPreferredSize(new Dimension(56, 22));
 
-            analysisMoveLabels[i] = new JLabel(" ");
-            analysisMoveLabels[i].setFont(new Font("SansSerif", Font.PLAIN, 13));
+            analysisMovePanels[i] = new PvLinePanel();
+            analysisMovePanels[i].setListener(createPvListener());
 
             JPanel row = new JPanel(new BorderLayout(8, 0));
             row.setOpaque(false);
@@ -282,7 +282,7 @@ public class ChessFrame extends JFrame {
             row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
             row.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
             row.add(analysisScoreLabels[i], BorderLayout.WEST);
-            row.add(analysisMoveLabels[i], BorderLayout.CENTER);
+            row.add(analysisMovePanels[i], BorderLayout.CENTER);
             analysisPanel.add(row);
         }
 
@@ -296,7 +296,7 @@ public class ChessFrame extends JFrame {
 
         sidePanel.add(Box.createVerticalStrut(14));
 
-        // --- Castling Rights & Active Player Panel (Hidden by default) ---
+        //Castling Rights & Active Player Panel (Hidden by default)
         castlingAndPlayerPanel = new JPanel();
         castlingAndPlayerPanel.setLayout(new BoxLayout(castlingAndPlayerPanel, BoxLayout.Y_AXIS));
         castlingAndPlayerPanel.setOpaque(false);
@@ -563,13 +563,19 @@ public class ChessFrame extends JFrame {
                 "boardMove",
                 evt -> {
                     if (!isEditorMode) {
-                        handleManualMove(
-                                (Board) evt.getOldValue(),
-                                (Board) evt.getNewValue()
-                        );
+                        handleManualMove((Board) evt.getOldValue(),(Board) evt.getNewValue());
                     }
                 }
         );
+
+        // Miniature board preview for the engine lines; hidden whenever the window loses focus
+        miniBoard = new MiniBoardPopup(this);
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowDeactivated(java.awt.event.WindowEvent e) {
+                hideMiniBoard();
+            }
+        });
 
         // Initial UI state setup
         syncCastlingRightsUI();
@@ -634,9 +640,8 @@ public class ChessFrame extends JFrame {
         return panel;
     }
 
-    /**
-     * Lets a palette button be dragged onto the board. The dragged data is the
-     * single piece character (e.g. 'Q' or 'p'), received by ChessBoardPanel.
+    /* Lets a palette button be dragged onto the board. The dragged data is the
+     single piece character (e.g. 'Q' or 'p'), received by ChessBoardPanel.
      */
     private void makeDraggable(JButton btn, char pieceCode, String symbol) {
         TransferHandler handler = new TransferHandler() {
@@ -706,10 +711,10 @@ public class ChessFrame extends JFrame {
         return img;
     }
 
-    /**
-     * Selects a palette piece (or delete mode 'X'). Selecting the same one again
-     * switches it off. Both delete buttons share the code 'X', so clicking either
-     * delete button while delete mode is active turns it off.
+    /*
+     Selects a palette piece (or delete mode 'X'). Selecting the same one again
+     switches it off. Both delete buttons share the code 'X', so clicking either
+     delete button while delete mode is active turns it off.
      */
     private void selectPalettePiece(char pieceCode) {
         if (selectedEditorPiece == pieceCode) {
@@ -733,7 +738,7 @@ public class ChessFrame extends JFrame {
         }
     }
 
-    // --- Board Editor Operations ---
+    // Board Editor Operations
     private void enterEditorMode() {
         isEditorMode = true;
         refreshAnalysis();   // hides the evaluation while the board is being edited
@@ -760,9 +765,8 @@ public class ChessFrame extends JFrame {
         statusLabel.setText("Board Editor Active");
     }
 
-    /**
-     * Click on a board square while in editor mode: place the selected palette
-     * piece, or delete the piece if delete mode is active.
+    /*Click on a board square while in editor mode: place the selected palette
+     piece, or delete the piece if delete mode is active.
      */
     private void handleEditorSquareClick(int square) {
         if (!isEditorMode || selectedEditorPiece == '\0') {
@@ -786,9 +790,9 @@ public class ChessFrame extends JFrame {
         afterEditorChange(board);
     }
 
-    /**
-     * Places a piece (from a click or a drag and drop) enforcing the editor rules:
-     * pawns not on the 1st/8th rank, and only one king of each colour.
+    /*
+     Places a piece (from a click or a drag and drop) enforcing the editor rules:
+     pawns not on the 1st/8th rank, and only one king of each colour.
      */
     private void placeEditorPiece(int square, char piece) {
         if (!isEditorMode || "KQRBNPkqrbnp".indexOf(piece) < 0) {
@@ -834,8 +838,8 @@ public class ChessFrame extends JFrame {
         recalculateMaterialScore();
     }
 
-    /**
-     * Copies side-to-move and castling checkboxes into the board being edited.
+    /*
+     Copies side-to-move and castling checkboxes into the board being edited.
      */
     private void applyEditorOptionsToBoard() {
         if (syncingUI || !isEditorMode) {
@@ -873,9 +877,9 @@ public class ChessFrame extends JFrame {
         recalculateMaterialScore();
     }
 
-    // --- Variants (board editor drop-down) ---
+    //Variants (board editor drop-down)
 
-    /** Shows the drop-down entry that matches the board being edited. */
+    //Shows the drop-down entry that matches the board being edited.
     private void syncVariantComboWithBoard() {
         Board board = boardPanel.getBoard();
         boolean horde = board != null && board.isHorde();
@@ -904,7 +908,7 @@ public class ChessFrame extends JFrame {
         updateVariantUI(horde);
     }
 
-    /** The user picked a variant: put that variant's starting position on the board. */
+    //The user picked a variant: put that variant's starting position on the board.
     private void onVariantSelected() {
         if (syncingUI || !isEditorMode) {
             return;
@@ -934,7 +938,7 @@ public class ChessFrame extends JFrame {
         recalculateMaterialScore();
     }
 
-    /** Horde chess: White has no king, so the white king cannot be picked from the palette. */
+    //Horde chess: White has no king, so the white king cannot be picked from the palette.
     private void updateVariantUI(boolean horde) {
         for (Map.Entry<JButton, Character> entry : paletteButtons.entrySet()) {
             if (entry.getValue() == 'K') {
@@ -1078,7 +1082,7 @@ public class ChessFrame extends JFrame {
         boardPanel.repaint();
     }
 
-    // ---------------- Evaluation bar & best lines ----------------
+    //Evaluation bar & best lines
 
     private static final class AnalysisSnapshot {
         final int depth;
@@ -1092,6 +1096,7 @@ public class ChessFrame extends JFrame {
 
     private void stopAnalysis() {
         analysisGeneration++;
+        hideMiniBoard();
 
         if (analysisEngine != null) {
             analysisEngine.cancel();
@@ -1103,12 +1108,13 @@ public class ChessFrame extends JFrame {
         }
     }
 
-    /**
-     * Called whenever the shown position changes (and when the toggle is clicked):
-     * hides everything when the toggle is off, otherwise starts a fresh analysis.
+    /*
+     Called whenever the shown position changes (and when the toggle is clicked):
+     hides everything when the toggle is off, otherwise starts a fresh analysis.
      */
     private void refreshAnalysis() {
         stopAnalysis();
+        analysisAnchor = null;
 
         boolean show = analysisToggle.isSelected() && !isEditorMode && currentNode != null;
         analysisPanel.setVisible(show);
@@ -1126,6 +1132,12 @@ public class ChessFrame extends JFrame {
             return;
         }
 
+        // the old lines belong to another position: they must not stay clickable
+        for (int i = 0; i < analysisMovePanels.length; i++) {
+            clearAnalysisRow(i);
+        }
+
+        analysisAnchor = currentNode;
         analysisDepthLabel.setText("analysing...");
         startAnalysis(position);
     }
@@ -1163,16 +1175,14 @@ public class ChessFrame extends JFrame {
 
         for (int i = 0; i < analysisScoreLabels.length; i++) {
             JLabel score = analysisScoreLabels[i];
-            JLabel moves = analysisMoveLabels[i];
+            PvLinePanel moves = analysisMovePanels[i];
 
             if (i < lines.size()) {
                 ChessEngine.AnalysisLine line = lines.get(i);
-                String text = pvToText(position, line.pv);
 
                 score.setText(formatEval(line));
                 styleScoreLabel(score, line.mateIn > 0 || (line.mateIn == 0 && line.scoreCp >= 0));
-                moves.setText(text);
-                moves.setToolTipText(text);
+                moves.setSteps(pvToSteps(position, line.pv));
             } else {
                 clearAnalysisRow(i);
             }
@@ -1209,8 +1219,7 @@ public class ChessFrame extends JFrame {
         analysisScoreLabels[row].setText(" ");
         analysisScoreLabels[row].setOpaque(false);
         analysisScoreLabels[row].setBorder(null);
-        analysisMoveLabels[row].setText(" ");
-        analysisMoveLabels[row].setToolTipText(null);
+        analysisMovePanels[row].setSteps(null);
     }
 
     private void styleScoreLabel(JLabel label, boolean whiteBetter) {
@@ -1246,9 +1255,12 @@ public class ChessFrame extends JFrame {
         return 1.0 / (1.0 + Math.exp(-0.00368208 * line.scoreCp));
     }
 
-    /** The expected continuation written like the move list: "2. Nf3 d5 3. d4 ...". */
-    private String pvToText(Board start, List<Move> pv) {
-        StringBuilder sb = new StringBuilder();
+    /*
+     The expected continuation as separate moves ("6." "Bd3", "e6", "7." "O-O" ...), each with
+     the position after it, so every move can be previewed and clicked.
+     */
+    private List<PvLinePanel.Step> pvToSteps(Board start, List<Move> pv) {
+        List<PvLinePanel.Step> steps = new ArrayList<>();
         Board current = start.copy();
 
         int fullMove = currentNode.ply / 2 + 1;
@@ -1263,13 +1275,14 @@ public class ChessFrame extends JFrame {
                 String san = createNotation(before, current, move,
                         before.getWhiteChecks(), before.getBlackChecks());
 
+                String number = "";
                 if (whiteMoves) {
-                    sb.append(fullMove).append(". ");
+                    number = fullMove + ".";
                 } else if (first) {
-                    sb.append(fullMove).append("... ");
+                    number = fullMove + "...";
                 }
 
-                sb.append(san).append(' ');
+                steps.add(new PvLinePanel.Step(number, san, current.copy(), move));
 
                 if (!whiteMoves) {
                     fullMove++;
@@ -1278,13 +1291,87 @@ public class ChessFrame extends JFrame {
                 first = false;
             }
         } catch (RuntimeException ex) {
-            // keep whatever could be written
+            // keep whatever could be built
         }
 
-        return sb.toString().trim();
+        return steps;
     }
 
-    /** 0 = still being played, 1 = White has won, -1 = Black has won, 2 = drawn. */
+    //Engine lines: hover = miniature board, click = play the line
+
+    private PvLinePanel.Listener createPvListener() {
+        return new PvLinePanel.Listener() {
+            @Override
+            public void onHover(PvLinePanel source, int index, Rectangle tokenBounds) {
+                List<PvLinePanel.Step> steps = source.getSteps();
+                if (miniBoard == null || index < 0 || index >= steps.size() || !source.isShowing()) {
+                    return;
+                }
+
+                PvLinePanel.Step step = steps.get(index);
+                Point origin = source.getLocationOnScreen();
+
+                // anchor = the whole row height, so the preview never lands under the pointer
+                Rectangle anchor = new Rectangle(origin.x + tokenBounds.x, origin.y,
+                        tokenBounds.width, source.getHeight());
+
+                miniBoard.showPosition(step.after, step.move, isFlipped, anchor);
+            }
+
+            @Override
+            public void onHoverEnd(PvLinePanel source) {
+                hideMiniBoard();
+            }
+
+            @Override
+            public void onClick(PvLinePanel source, int index) {
+                playEngineLine(source.getSteps(), index);
+            }
+        };
+    }
+
+    private void hideMiniBoard() {
+        if (miniBoard != null) {
+            miniBoard.hidePopup();
+        }
+    }
+
+    /*
+     Writes the whole engine line into the move tree (as a variation, or as the continuation of
+     the game when there is none yet) and shows the position after the clicked move. Selecting
+     the node updates the board, the MOVES list and restarts the evaluation for that position.
+     */
+    private void playEngineLine(List<PvLinePanel.Step> steps, int clickedIndex) {
+        hideMiniBoard();
+
+        MoveNode anchor = analysisAnchor;
+        if (isEditorMode || knightsTour.isActive() || anchor == null || anchor != currentNode
+                || !isSubtreeOf(anchor, rootNode) || clickedIndex < 0 || clickedIndex >= steps.size()) {
+            return;
+        }
+
+        MoveNode node = anchor;
+        MoveNode target = null;
+
+        try {
+            for (int i = 0; i < steps.size(); i++) {
+                PvLinePanel.Step step = steps.get(i);
+                node = findOrCreateChild(node, node.board, step.after, step.move);
+
+                if (i == clickedIndex) {
+                    target = node;
+                }
+            }
+        } catch (RuntimeException ex) {
+            // use as much of the line as could be added
+        }
+
+        if (target != null) {
+            selectNode(target);
+        }
+    }
+
+    //0 = still being played, 1 = White has won, -1 = Black has won, 2 = drawn.
     private int gameResult(Board board) {
         boolean whiteToMove = board.isWhiteToMove();
 
@@ -1320,7 +1407,7 @@ public class ChessFrame extends JFrame {
         return 2;                              // stalemate
     }
 
-    // --- Three-Check boxes ---
+    // Three-Check boxes
 
     private JPanel createCheckPanel(JLabel[] marks) {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 4));
@@ -1342,10 +1429,10 @@ public class ChessFrame extends JFrame {
         }
     }
 
-    /**
-     * Shows the two boxes only in Three-Check (outside the editor). Each check a colour
-     * has given turns the next "➕" (left to right) into a "❌". The box at the bottom
-     * belongs to the colour at the bottom of the board, so they swap when the board is flipped.
+    /*
+      Shows the two boxes only in Three-Check (outside the editor). Each check a colour
+     has given turns the next "➕" (left to right) into a "❌". The box at the bottom
+     belongs to the colour at the bottom of the board, so they swap when the board is flipped.
      */
     private void updateCheckBoxes() {
         boolean show = !isEditorMode && currentNode != null && currentNode.board.isThreeCheck();
@@ -1639,31 +1726,34 @@ public class ChessFrame extends JFrame {
     }
 
     private String createNotation(Board before, Board after, Move move, int whiteChecksGiven, int blackChecksGiven) {
-        if (move.castleKingSide) return "O-O";
-        if (move.castleQueenSide) return "O-O-O";
-
         StringBuilder sb = new StringBuilder();
-        char piece = Character.toUpperCase(before.getPiece(move.from));
-        boolean isCapture = (before.getPiece(move.to) != '.') || move.enPassant;
 
-        if (piece != 'P') {
-            sb.append(piece);
-            sb.append(disambiguation(before, move));
-        } else if (isCapture) {
-            int file = move.from % 8;
-            sb.append((char) ('a' + file));
-        }
+        // Castling gets the same check / checkmate suffix as every other move
+        if (move.castleKingSide || move.castleQueenSide) {
+            sb.append(move.castleKingSide ? "O-O" : "O-O-O");
+        } else {
+            char piece = Character.toUpperCase(before.getPiece(move.from));
+            boolean isCapture = (before.getPiece(move.to) != '.') || move.enPassant;
 
-        if (isCapture) {
-            sb.append('x');
-        }
+            if (piece != 'P') {
+                sb.append(piece);
+                sb.append(disambiguation(before, move));
+            } else if (isCapture) {
+                int file = move.from % 8;
+                sb.append((char) ('a' + file));
+            }
 
-        int toCol = move.to % 8;
-        int toRank = move.to / 8;
-        sb.append((char) ('a' + toCol)).append(toRank + 1);
+            if (isCapture) {
+                sb.append('x');
+            }
 
-        if (move.promotion != '\0' && move.promotion != ' ') {
-            sb.append('=').append(Character.toUpperCase(move.promotion));
+            int toCol = move.to % 8;
+            int toRank = move.to / 8;
+            sb.append((char) ('a' + toCol)).append(toRank + 1);
+
+            if (move.promotion != '\0' && move.promotion != ' ') {
+                sb.append('=').append(Character.toUpperCase(move.promotion));
+            }
         }
 
         // --- Variant Game Ending Notation Checks ---
@@ -1711,21 +1801,28 @@ public class ChessFrame extends JFrame {
         return sb.toString();
     }
     private void recordMove(Board before, Board after, Move move) {
+        selectNode(findOrCreateChild(currentNode, before, after, move));
+    }
+
+    /**
+     * Returns the child of {@code parent} that plays {@code move}, creating it when the move is
+     * new. Does not change the selected node.
+     */
+    private MoveNode findOrCreateChild(MoveNode parent, Board before, Board after, Move move) {
         String notation = createNotation(before, after, move,
                 before.getWhiteChecks(), before.getBlackChecks());
 
-        for (MoveNode child : currentNode.children) {
+        for (MoveNode child : parent.children) {
             // compare the real move too, so two different pieces never get merged into one branch
             if (child.notation.equals(notation) && child.move != null && child.move.equals(move)) {
-                selectNode(child);
-                return;
+                return child;
             }
         }
 
-        MoveNode newNode = new MoveNode(after.copy(), move, notation, currentNode.ply + 1);
-        newNode.parent = currentNode;
-        currentNode.children.add(newNode);
-        selectNode(newNode);
+        MoveNode newNode = new MoveNode(after.copy(), move, notation, parent.ply + 1);
+        newNode.parent = parent;
+        parent.children.add(newNode);
+        return newNode;
     }
 
     private void selectNode(MoveNode target) {
@@ -2076,9 +2173,9 @@ public class ChessFrame extends JFrame {
         return pawnMove || capture;
     }
 
-    /**
-     * 50-move rule: 50 moves by each side (100 plies) with no pawn move and
-     * no capture. The count starts from the start of the move list.
+    /*
+     50-move rule: 50 moves by each side (100 plies) with no pawn move and
+     no capture. The count starts from the start of the move list.
      */
     private boolean isFiftyMoveRuleDraw(MoveNode node) {
         int plies = 0;
@@ -2344,8 +2441,8 @@ public class ChessFrame extends JFrame {
         }
     }
 
-    /**
-     * Counts every move in the tree (main line and variations), excluding the root.
+    /*
+     Counts every move in the tree (main line and variations), excluding the root.
      */
     private int countMoves(MoveNode node) {
         int count = 0;
