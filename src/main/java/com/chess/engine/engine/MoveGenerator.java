@@ -7,6 +7,14 @@ public class MoveGenerator {
 	
 	public static List<Move> generateLegalMoves(Board board) {
 
+		if (board.isKingOfTheHill() && KingOfTheHill.isGameWon(board)) {
+			return new ArrayList<>(); // a king is on the hill: the game is over
+		}
+
+		if (board.isRacingKings() && RacingKings.isDecided(board)) {
+			return new ArrayList<>(); // a king has reached the 8th rank: the game is over
+		}
+
 		if (board.isAtomic()) {
 			return AtomicChess.generateLegalMoves(board);
 		}
@@ -26,7 +34,9 @@ public class MoveGenerator {
 
             boolean whiteMoved = board.isWhiteToMove();
 
-            if (!isKingInCheck(copy, whiteMoved)) {
+            // Racing Kings: neither king may be in check after any move
+            if (!isKingInCheck(copy, whiteMoved)
+                    && !(board.isRacingKings() && isKingInCheck(copy, !whiteMoved))) {
                 legal.add(move);
             }
         }

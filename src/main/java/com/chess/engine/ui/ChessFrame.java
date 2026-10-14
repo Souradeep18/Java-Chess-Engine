@@ -7,6 +7,8 @@ import com.chess.engine.engine.HordeChess;
 import com.chess.engine.engine.Move;
 import com.chess.engine.engine.MoveGenerator;
 import com.chess.engine.engine.AntiChess;
+import com.chess.engine.engine.KingOfTheHill;
+import com.chess.engine.engine.RacingKings;
 import com.chess.engine.engine.ThreeCheck;
 
 import javax.swing.*;
@@ -192,7 +194,9 @@ public class ChessFrame extends JFrame {
                 HordeChess.VARIANT_HORDE,
                 AtomicChess.VARIANT_ATOMIC,
                 ThreeCheck.VARIANT_THREE_CHECK,
-                AntiChess.VARIANT_ANTI_CHESS});
+                AntiChess.VARIANT_ANTI_CHESS,
+                KingOfTheHill.VARIANT_KING_OF_THE_HILL,
+                RacingKings.VARIANT_RACING_KINGS});
         variantCombo.setMaximumSize(new Dimension(320, 32));
         variantCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
         variantCombo.setVisible(false);
@@ -786,6 +790,10 @@ public class ChessFrame extends JFrame {
             return;
         }
 
+        if (racingEditRejected(board, square, '.')) {
+            return;
+        }
+
         board.setPiece(square, '.');
         afterEditorChange(board);
     }
@@ -814,6 +822,14 @@ public class ChessFrame extends JFrame {
                     "Invalid Placement",
                     JOptionPane.WARNING_MESSAGE
             ));
+            return;
+        }
+
+        // Racing Kings: no pawns, and neither king may ever stand in check
+        if (board.isRacingKings() && (piece == 'P' || piece == 'p')) {
+            return;
+        }
+        if (racingEditRejected(board, square, piece)) {
             return;
         }
 
@@ -870,6 +886,10 @@ public class ChessFrame extends JFrame {
             board.setThreeCheck(true);
         } else if (current != null && current.isAntiChess()) {
             board.setAntiChess(true);
+        } else if (current != null && current.isKingOfTheHill()) {
+            board.setKingOfTheHill(true);
+        } else if (current != null && current.isRacingKings()) {
+            RacingKings.setupStartingPosition(board);
         }
 
         boardPanel.setBoard(board);
@@ -886,6 +906,8 @@ public class ChessFrame extends JFrame {
         boolean atomic = board != null && board.isAtomic();
         boolean threeCheck = board != null && board.isThreeCheck();
         boolean antiChess = board != null && board.isAntiChess();
+        boolean kingOfTheHill = board != null && board.isKingOfTheHill();
+        boolean racingKings = board != null && board.isRacingKings();
 
         String name = HordeChess.VARIANT_STANDARD;
         if (horde) {
@@ -896,6 +918,10 @@ public class ChessFrame extends JFrame {
             name = ThreeCheck.VARIANT_THREE_CHECK;
         } else if (antiChess) {
             name = AntiChess.VARIANT_ANTI_CHESS;
+        } else if (kingOfTheHill) {
+            name = KingOfTheHill.VARIANT_KING_OF_THE_HILL;
+        } else if (racingKings) {
+            name = RacingKings.VARIANT_RACING_KINGS;
         }
 
         syncingUI = true;
@@ -919,6 +945,8 @@ public class ChessFrame extends JFrame {
         boolean atomic = AtomicChess.VARIANT_ATOMIC.equals(chosen);
         boolean threeCheck = ThreeCheck.VARIANT_THREE_CHECK.equals(chosen);
         boolean antiChess = AntiChess.VARIANT_ANTI_CHESS.equals(chosen);
+        boolean kingOfTheHill = KingOfTheHill.VARIANT_KING_OF_THE_HILL.equals(chosen);
+        boolean racingKings = RacingKings.VARIANT_RACING_KINGS.equals(chosen);
 
         // Standard and Atomic start from the normal position; Horde has its own
         Board board = new Board();
@@ -930,6 +958,10 @@ public class ChessFrame extends JFrame {
             board.setThreeCheck(true);
         } else if (antiChess) {
             board.setAntiChess(true); // also switches castling off
+        } else if (kingOfTheHill) {
+            board.setKingOfTheHill(true);
+        } else if (racingKings) {
+            RacingKings.setupStartingPosition(board);
         }
 
         boardPanel.setBoard(board);
@@ -950,6 +982,48 @@ public class ChessFrame extends JFrame {
             selectedEditorPiece = '\0';
             updatePaletteHighlight();
         }
+
+        // Racing Kings has no pawns: they cannot be picked from the palette
+        Board edited = boardPanel.getBoard();
+        boolean racing = edited != null && edited.isRacingKings();
+        for (Map.Entry<JButton, Character> entry : paletteButtons.entrySet()) {
+            if (entry.getValue() == 'P' || entry.getValue() == 'p') {
+                entry.getKey().setEnabled(!racing);
+            }
+        }
+        if (racing && (selectedEditorPiece == 'P' || selectedEditorPiece == 'p')) {
+            selectedEditorPiece = '\0';
+            updatePaletteHighlight();
+        }
+    }
+
+    /*
+     Racing Kings editor rule: a change that would leave either king in check is refused with a dialog.
+     piece '.' means the square is being emptied. Returns true when the change must not be made.
+     */
+    private boolean racingEditRejected(Board board, int square, char piece) {
+        if (!board.isRacingKings()) {
+            return false;
+        }
+
+        Board test = board.copy();
+        if (piece == 'K' || piece == 'k') {
+            for (int sq = 0; sq < 64; sq++) {
+                if (sq != square && test.getPiece(sq) == piece) {
+                    test.setPiece(sq, '.');
+                }
+            }
+        }
+        test.setPiece(square, piece);
+
+        String error = RacingKings.checkError(test);
+        if (error == null) {
+            return false;
+        }
+
+        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+                this, error, "Invalid Placement", JOptionPane.WARNING_MESSAGE));
+        return true;
     }
 
     private void clearBoardPieces() {
@@ -1002,6 +1076,11 @@ public class ChessFrame extends JFrame {
         }
 
         boolean whiteToMoveChosen = activePlayerCombo.getSelectedIndex() == 0;
+        String racingError = board.isRacingKings() ? RacingKings.checkError(board) : null;
+        if (racingError != null) {
+            JOptionPane.showMessageDialog(this, racingError, "Invalid Board Position", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
         if (isKingInCheck(board, !whiteToMoveChosen)) {
             JOptionPane.showMessageDialog(
                     this,
@@ -1385,6 +1464,21 @@ public class ChessFrame extends JFrame {
             if (board.getBlackChecks() >= 3) return -1;
         }
 
+        if (board.isRacingKings()) {
+            switch (RacingKings.getResult(board)) {
+                case WHITE_WINS: return 1;
+                case BLACK_WINS: return -1;
+                case DRAW_BOTH_REACHED:
+                case STALEMATE: return 2;
+                default: return 0;
+            }
+        }
+
+        if (board.isKingOfTheHill()) {
+            if (KingOfTheHill.hasKingOnHill(board, true)) return 1;
+            if (KingOfTheHill.hasKingOnHill(board, false)) return -1;
+        }
+
         if (board.isAntiChess()) {
             if (AntiChess.hasNoPieces(board, true)) return 1;
             if (AntiChess.hasNoPieces(board, false)) return -1;
@@ -1485,7 +1579,7 @@ public class ChessFrame extends JFrame {
         boolean whiteKingRookOnRank1 = (currentBoard.getPiece(7) == 'R');
         boolean whiteQueenRookOnRank1 = (currentBoard.getPiece(0) == 'R');
 
-        boolean noCastling = currentBoard.isAntiChess(); // no castling in anti-chess
+        boolean noCastling = currentBoard.isAntiChess() || currentBoard.isRacingKings(); // no castling in these variants
 
         whiteKingSideCb.setEnabled(!noCastling && whiteKingOnRank1 && whiteKingRookOnRank1);
         whiteQueenSideCb.setEnabled(!noCastling && whiteKingOnRank1 && whiteQueenRookOnRank1);
@@ -1655,8 +1749,8 @@ public class ChessFrame extends JFrame {
     }
 
     private boolean isKingInCheck(Board board, boolean isWhite) {
-        if (board.isAntiChess()) {
-            return false; // Anti-Chess has no check
+        if (board.isAntiChess() || board.isRacingKings()) {
+            return false; // no check in Anti-Chess; in Racing Kings a check can never occur
         }
 
         if (board.isAtomic()) {
@@ -1762,6 +1856,20 @@ public class ChessFrame extends JFrame {
             sb.append('#'); // Black takes all pieces from white in horde variation
         } else if (after.isAtomic() && AtomicChess.hasLostKing(after, after.isWhiteToMove())) {
             sb.append('#'); // The king was blown off
+        } else if (after.isRacingKings()) {
+            boolean moverWhite = before.isWhiteToMove();
+            boolean arrived = RacingKings.kingOnEighth(after, moverWhite)
+                    && !RacingKings.kingOnEighth(before, moverWhite);
+
+            if (arrived && RacingKings.kingOnEighth(after, !moverWhite)) {
+                sb.append(" 1/2-1/2");   // Black answered White's arrival: drawn race
+            } else if (arrived) {
+                sb.append('#');          // first king to reach the 8th rank
+            } else if (RacingKings.getResult(after) == RacingKings.Result.STALEMATE) {
+                sb.append(" 1/2-1/2");
+            }
+        } else if (after.isKingOfTheHill() && KingOfTheHill.hasKingOnHill(after, before.isWhiteToMove())) {
+            sb.append('#'); // the king has climbed the hill
         } else if (after.isAntiChess()) {
             // Anti-Chess: The game ends with '#' when a side loses all pieces or has no legal moves
             boolean previousMoverIsWhite = before.isWhiteToMove();
@@ -1879,6 +1987,16 @@ public class ChessFrame extends JFrame {
             return;
         }
 
+        if (board.isKingOfTheHill()) {
+            updateKingOfTheHillStatus(board, whiteToMove, inCheck);
+            return;
+        }
+
+        if (board.isRacingKings()) {
+            updateRacingKingsStatus(board, whiteToMove);
+            return;
+        }
+
         if (board.isThreeCheck()) {
             updateThreeCheckStatus(board, whiteToMove, inCheck);
             return;
@@ -1969,6 +2087,84 @@ public class ChessFrame extends JFrame {
                 break;
             case BLACK_WINS:
                 statusLabel.setText(HordeChess.BLACK_WINS_STATUS);
+                break;
+            case STALEMATE:
+                statusLabel.setText("Stalemate! Game drawn.");
+                break;
+            default:
+                if (isFiftyMoveRuleDraw(currentNode)) {
+                    statusLabel.setText("Stalemate by 50-move rule");
+                } else if (isThreefoldRepetition(currentNode)) {
+                    statusLabel.setText("Stalemate due to threefold repetition");
+                } else if (inCheck) {
+                    gameOver = false;
+                    statusLabel.setText((whiteToMove ? "White" : "Black") + " is in CHECK");
+                } else {
+                    gameOver = false;
+                    statusLabel.setText((whiteToMove ? "White" : "Black") + " to move");
+                }
+                break;
+        }
+
+        applyGameOverState(gameOver);
+    }
+
+    /*
+      Racing Kings: first king to the 8th rank wins; if White arrives first and Black follows, it is a draw.
+     */
+    private void updateRacingKingsStatus(Board board, boolean whiteToMove) {
+        boolean gameOver = true;
+
+        switch (RacingKings.getResult(board)) {
+            case WHITE_WINS:
+                statusLabel.setText("King reached the 8th rank, White wins !");
+                break;
+            case BLACK_WINS:
+                statusLabel.setText("King reached the 8th rank, Black wins !");
+                break;
+            case DRAW_BOTH_REACHED:
+                statusLabel.setText("Both kings reached the 8th rank! Game drawn.");
+                break;
+            case STALEMATE:
+                statusLabel.setText("Stalemate! Game drawn.");
+                break;
+            default:
+                if (isFiftyMoveRuleDraw(currentNode)) {
+                    statusLabel.setText("Stalemate by 50-move rule");
+                } else if (isThreefoldRepetition(currentNode)) {
+                    statusLabel.setText("Stalemate due to threefold repetition");
+                } else if (!whiteToMove && RacingKings.kingOnEighth(board, true)) {
+                    gameOver = false;
+                    statusLabel.setText("White reached the 8th rank - Black must follow to draw");
+                } else {
+                    gameOver = false;
+                    statusLabel.setText((whiteToMove ? "White" : "Black") + " to move");
+                }
+                break;
+        }
+
+        applyGameOverState(gameOver);
+    }
+
+    /**
+     * King of the Hill: a king on d4/e4/d5/e5 wins, otherwise normal chess rules.
+     * (Insufficient-material draws do not apply: a lone king can still walk to the hill.)
+     */
+    private void updateKingOfTheHillStatus(Board board, boolean whiteToMove, boolean inCheck) {
+        boolean gameOver = true;
+
+        switch (KingOfTheHill.getResult(board)) {
+            case WHITE_KING_ON_HILL:
+                statusLabel.setText(KingOfTheHill.winMessage(true));
+                break;
+            case BLACK_KING_ON_HILL:
+                statusLabel.setText(KingOfTheHill.winMessage(false));
+                break;
+            case WHITE_CHECKMATED:
+                statusLabel.setText("Checkmate! Black wins");
+                break;
+            case BLACK_CHECKMATED:
+                statusLabel.setText("Checkmate! White wins");
                 break;
             case STALEMATE:
                 statusLabel.setText("Stalemate! Game drawn.");

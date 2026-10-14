@@ -121,6 +121,22 @@ public class ChessEngine {
             return -CHECKMATE_SCORE + ply;
         }
 
+        // Racing Kings: the race may already be decided
+        if (board.isRacingKings()) {
+            int outcome = RacingKings.outcome(board);
+            if (outcome == 2) return 0;
+            if (outcome != 0) {
+                boolean sideToMoveWon = (outcome == 1) == board.isWhiteToMove();
+                return sideToMoveWon ? CHECKMATE_SCORE - ply : -CHECKMATE_SCORE + ply;
+            }
+        }
+
+        // King of the Hill: a king standing on d4/e4/d5/e5 has won
+        if (board.isKingOfTheHill()) {
+            if (KingOfTheHill.hasKingOnHill(board, !board.isWhiteToMove())) return -CHECKMATE_SCORE + ply;
+            if (KingOfTheHill.hasKingOnHill(board, board.isWhiteToMove())) return CHECKMATE_SCORE - ply;
+        }
+
         // --- 2. TRANSPOSITION TABLE LOOKUP ---
         TTEntry ttEntry = transpositionTable.get(zobristKey);
         if (ttEntry != null && ttEntry.depth >= depth) {
@@ -155,7 +171,7 @@ public class ChessEngine {
         }
 
         // --- 4. NULL MOVE PRUNING (NMP) ---
-        if (allowNull && !inCheck && searchDepth >= 3 && hasNonPawnMaterial(board) && !board.isAntiChess()) {
+        if (allowNull && !inCheck && searchDepth >= 3 && hasNonPawnMaterial(board) && !board.isAntiChess() && !board.isRacingKings()) {
             board.makeNullMove();
             int R = 2; // Reduction factor
             int nullScore = -alphaBeta(board, searchDepth - 1 - R, ply + 1, -beta, -beta + 1, false);
@@ -172,6 +188,9 @@ public class ChessEngine {
         if (legalMoves.isEmpty()) {
             if (board.isAntiChess()) {
                 return CHECKMATE_SCORE - ply; // Anti-chess: no pieces / no moves means the side to move WINS
+            }
+            if (board.isRacingKings() && !board.isWhiteToMove() && RacingKings.kingOnEighth(board, true)) {
+                return -CHECKMATE_SCORE + ply; // White is home and Black has no move to follow
             }
             if (inCheck) {
                 return -CHECKMATE_SCORE + ply; // Prefer faster checkmate
@@ -250,6 +269,22 @@ public class ChessEngine {
 
         if (board.isThreeCheck() && (board.getWhiteChecks() >= 3 || board.getBlackChecks() >= 3)) {
             return -CHECKMATE_SCORE + ply;
+        }
+
+        if (board.isKingOfTheHill()) {
+            if (KingOfTheHill.hasKingOnHill(board, !board.isWhiteToMove())) return -CHECKMATE_SCORE + ply;
+            if (KingOfTheHill.hasKingOnHill(board, board.isWhiteToMove())) return CHECKMATE_SCORE - ply;
+        }
+
+        // Racing Kings: decided races end the search, otherwise just evaluate the leaf
+        if (board.isRacingKings()) {
+            int outcome = RacingKings.outcome(board);
+            if (outcome == 2) return 0;
+            if (outcome != 0) {
+                boolean sideToMoveWon = (outcome == 1) == board.isWhiteToMove();
+                return sideToMoveWon ? CHECKMATE_SCORE - ply : -CHECKMATE_SCORE + ply;
+            }
+            return evaluate(board);
         }
 
         // Anti-chess: captures are forced, so just evaluate the leaf
@@ -397,12 +432,22 @@ public class ChessEngine {
             return AntiChess.evaluate(board); // already from the side-to-move's point of view
         }
 
+        if (board.isRacingKings()) {
+            int racing = RacingKings.evaluate(board);
+            return board.isWhiteToMove() ? racing : -racing;
+        }
+
         int perspective = board.isWhiteToMove() ? 1 : -1;
         int score = positionEval.evaluateWhite(board);
 
         // Three-Check: every check already delivered is worth a lot
         if (board.isThreeCheck()) {
             score += (board.getWhiteChecks() - board.getBlackChecks()) * 80;
+        }
+
+        // King of the Hill: a king near the centre is a real threat
+        if (board.isKingOfTheHill()) {
+            score += KingOfTheHill.kingProximityBonus(board);
         }
 
         return score * perspective;

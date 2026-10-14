@@ -27,6 +27,8 @@ public class Board {
 
     // Anti-chess variant: forced captures, no castling, lose all pieces to win
     private boolean antiChess = false;
+    private boolean kingOfTheHill = false;
+    private boolean racingKings = false;
 
     // Three-Check: number of checks each side has delivered so far
     private int whiteChecks = 0;
@@ -88,6 +90,8 @@ public class Board {
         this.atomic = other.atomic;
         this.threeCheck = other.threeCheck;
         this.antiChess = other.antiChess;
+        this.kingOfTheHill = other.kingOfTheHill;
+        this.racingKings = other.racingKings;
         this.whiteChecks = other.whiteChecks;
         this.blackChecks = other.blackChecks;
     }
@@ -116,6 +120,8 @@ public class Board {
         atomic = false;
         threeCheck = false;
         antiChess = false;
+        kingOfTheHill = false;
+        racingKings = false;
         whiteChecks = 0;
         blackChecks = 0;
         enPassantSquare = -1;
@@ -402,10 +408,19 @@ public class Board {
         if (atomic) {
             return AtomicChess.isMoverSafe(this, !whiteToMove);
         }
+        if (racingKings) {
+            return !isInCheck(true) && !isInCheck(false); // neither king may ever be in check
+        }
         return !isInCheck(!whiteToMove);
     }
 
     public List<Move> generateLegalMoves() {
+        if (racingKings && RacingKings.isDecided(this)) {
+            return new ArrayList<>(); // a king has reached the 8th rank: the game is over
+        }
+        if (kingOfTheHill && KingOfTheHill.isGameWon(this)) {
+            return new ArrayList<>(); // a king is on the hill: the game is over
+        }
         List<Move> pseudoMoves = generatePseudoMoves(false, false);
         List<Move> legalMoves = new ArrayList<>();
 
@@ -426,6 +441,12 @@ public class Board {
     }
 
     public List<Move> generateCaptures() {
+        if (racingKings && RacingKings.isDecided(this)) {
+            return new ArrayList<>(); // a king has reached the 8th rank: the game is over
+        }
+        if (kingOfTheHill && KingOfTheHill.isGameWon(this)) {
+            return new ArrayList<>(); // a king is on the hill: the game is over
+        }
         List<Move> pseudoCaptures = generatePseudoMoves(true, false);
         List<Move> legalCaptures = new ArrayList<>();
 
@@ -440,6 +461,12 @@ public class Board {
     }
 
     public List<Move> generateQuietChecks() {
+        if (racingKings && RacingKings.isDecided(this)) {
+            return new ArrayList<>(); // a king has reached the 8th rank: the game is over
+        }
+        if (kingOfTheHill && KingOfTheHill.isGameWon(this)) {
+            return new ArrayList<>(); // a king is on the hill: the game is over
+        }
         List<Move> pseudoQuiets = generatePseudoMoves(false, true);
         List<Move> quietChecks = new ArrayList<>();
 
@@ -713,6 +740,21 @@ public class Board {
     public int getBlackChecks() { return blackChecks; }
     public void setWhiteChecks(int value) { whiteChecks = value; }
     public void setBlackChecks(int value) { blackChecks = value; }
+
+    public boolean isRacingKings() { return racingKings; }
+    public void setRacingKings(boolean value) {
+        this.racingKings = value;
+        if (value) {
+            // Racing Kings has no castling
+            this.whiteKingSideCastle = false;
+            this.whiteQueenSideCastle = false;
+            this.blackKingSideCastle = false;
+            this.blackQueenSideCastle = false;
+        }
+    }
+
+    public boolean isKingOfTheHill() { return kingOfTheHill; }
+    public void setKingOfTheHill(boolean value) { this.kingOfTheHill = value; }
 
     public boolean isAntiChess() { return antiChess; }
     public void setAntiChess(boolean value) {

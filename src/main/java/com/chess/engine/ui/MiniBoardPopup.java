@@ -115,6 +115,10 @@ public class MiniBoardPopup extends JWindow {
 
                     if (highlighted) {
                         g2.setColor(dark ? DARK_LAST_MOVE : LIGHT_LAST_MOVE);
+                    } else if (board.isRacingKings() && rank == 7) {
+                        g2.setColor(HillStyle.raisedRankColor(dark));
+                    } else if (board.isKingOfTheHill() && HillStyle.isHillSquare(square)) {
+                        g2.setColor(HillStyle.color(dark));
                     } else {
                         g2.setColor(dark ? DARK_SQUARE : LIGHT_SQUARE);
                     }
@@ -122,10 +126,40 @@ public class MiniBoardPopup extends JWindow {
                     int x = in.left + col * SQUARE;
                     int y = in.top + row * SQUARE;
                     g2.fillRect(x, y, SQUARE, SQUARE);
+                }
+            }
 
-                    char piece = board.getPiece(square);
+            // King of the Hill: the lifted centre is drawn under the pieces
+            if (board.isKingOfTheHill()) {
+                for (int row = 0; row < 8; row++) {
+                    for (int col = 0; col < 8; col++) {
+                        Graphics2D cell = (Graphics2D) g2.create();
+                        cell.translate(in.left + col * SQUARE, in.top + row * SQUARE);
+                        HillStyle.paintLift(cell, SQUARE, SQUARE, col, row);
+                        cell.dispose();
+                    }
+                }
+            }
+
+            // Racing Kings: the raised 8th rank
+            if (board.isRacingKings()) {
+                for (int row = 0; row < 8; row++) {
+                    for (int col = 0; col < 8; col++) {
+                        Graphics2D cell = (Graphics2D) g2.create();
+                        cell.translate(in.left + col * SQUARE, in.top + row * SQUARE);
+                        HillStyle.paintRaisedRank(cell, SQUARE, SQUARE, row, flipped ? 7 : 0);
+                        cell.dispose();
+                    }
+                }
+            }
+
+            for (int row = 0; row < 8; row++) {
+                for (int col = 0; col < 8; col++) {
+                    int file = flipped ? 7 - col : col;
+                    int rank = flipped ? row : 7 - row;
+                    char piece = board.getPiece(rank * 8 + file);
                     if (piece != '.') {
-                        drawPiece(g2, piece, x, y);
+                        drawPiece(g2, piece, in.left + col * SQUARE, in.top + row * SQUARE);
                     }
                 }
             }

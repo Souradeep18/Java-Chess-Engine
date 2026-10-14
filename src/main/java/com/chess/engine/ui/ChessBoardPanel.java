@@ -4,6 +4,7 @@ import com.chess.engine.engine.AtomicChess;
 import com.chess.engine.engine.Board;
 import com.chess.engine.engine.Move;
 import com.chess.engine.engine.MoveGenerator;
+import com.chess.engine.engine.RacingKings;
 
 import javax.swing.*;
 import java.awt.*;
@@ -168,6 +169,9 @@ public class ChessBoardPanel extends JPanel {
             button.fileLabel = (showCoordinates && rank == bottomRank) ? String.valueOf((char) ('a' + file)) : null;
             button.rankLabel = (showCoordinates && file == rightFile) ? String.valueOf(rank + 1) : null;
             button.darkSquare = (rank + file) % 2 == 0;
+            button.visualCol = isFlipped ? 7 - file : file;
+            button.visualRow = isFlipped ? rank : 7 - rank;
+            button.liftedRow = isFlipped ? 7 : 0;
         }
     }
 
@@ -525,6 +529,9 @@ public class ChessBoardPanel extends JPanel {
         int whiteKingSquare = editorMode ? -1 : findKing(board, true);
         int blackKingSquare = editorMode ? -1 : findKing(board, false);
 
+        boolean racingStalemate = !editorMode && board.isRacingKings()
+                && RacingKings.getResult(board) == RacingKings.Result.STALEMATE;
+
         for (int rank = 0; rank < 8; rank++) {
 
             for (int file = 0; file < 8; file++) {
@@ -537,7 +544,19 @@ public class ChessBoardPanel extends JPanel {
                 button.setLegalMoveDot(false);
                 button.setLegalCaptureRing(false);
 
-                if ((rank + file) % 2 == 0) {
+                boolean hillOn = board.isKingOfTheHill();
+                button.hillActive = hillOn;
+
+                boolean racingOn = board.isRacingKings();
+                button.racingActive = racingOn;
+                button.lockBadge = racingStalemate
+                        && (board.getPiece(square) == 'K' || board.getPiece(square) == 'k');
+
+                if (racingOn && rank == 7) {
+                    button.setBackground(HillStyle.raisedRankColor((rank + file) % 2 == 0));
+                } else if (hillOn && HillStyle.isHillSquare(square)) {
+                    button.setBackground(HillStyle.color((rank + file) % 2 == 0));
+                } else if ((rank + file) % 2 == 0) {
                     button.setBackground(DARK_SQUARE);
                 } else {
                     button.setBackground(LIGHT_SQUARE);
@@ -837,6 +856,11 @@ public class ChessBoardPanel extends JPanel {
         String fileLabel;
         String rankLabel;
         boolean darkSquare;
+        boolean racingActive; // Racing Kings: raised 8th rank
+        boolean lockBadge;    // Racing Kings stalemate: padlock on the king
+        int liftedRow;
+        boolean hillActive;   // King of the Hill: draw the lifted centre
+        int visualCol, visualRow;
 
         public void setLegalMoveDot(boolean legalMoveDot) {
             this.legalMoveDot = legalMoveDot;
@@ -858,6 +882,18 @@ public class ChessBoardPanel extends JPanel {
                 overlay.dispose();
             }
 
+            if (hillActive) {
+                Graphics2D lift = (Graphics2D) g.create();
+                HillStyle.paintLift(lift, getWidth(), getHeight(), visualCol, visualRow);
+                lift.dispose();
+            }
+
+            if (racingActive) {
+                Graphics2D lift = (Graphics2D) g.create();
+                HillStyle.paintRaisedRank(lift, getWidth(), getHeight(), visualRow, liftedRow);
+                lift.dispose();
+            }
+
             if (fileLabel != null || rankLabel != null) {
                 Graphics2D text = (Graphics2D) g.create();
                 text.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -873,6 +909,12 @@ public class ChessBoardPanel extends JPanel {
                     text.drawString(rankLabel, getWidth() - fm.stringWidth(rankLabel) - 4, fm.getAscent() + 2);
                 }
                 text.dispose();
+            }
+
+            if (lockBadge) {
+                Graphics2D lock = (Graphics2D) g.create();
+                HillStyle.paintLock(lock, getWidth(), getHeight());
+                lock.dispose();
             }
 
             if (legalMoveDot || legalCaptureRing) {
