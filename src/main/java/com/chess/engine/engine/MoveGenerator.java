@@ -293,6 +293,11 @@ public class MoveGenerator {
 		        return;
 		    }
 
+		    if (board.isChess960()) {
+		        Chess960.addCastlingMoves(board, square, moves);
+		        return;
+		    }
+
 		    if (white && square == 4) {
 
 		        if (board.canWhiteCastleKingSide() &&
@@ -349,6 +354,28 @@ public class MoveGenerator {
 	        char piece = board.getPiece(move.from);
 
 	        board.setPiece(move.from, '.');
+
+	        // Chess960 castling: the king moves onto its rook, both end on their normal castling squares
+	        if (board.isChess960() && (move.castleKingSide || move.castleQueenSide)) {
+	            boolean whiteKing = Character.isUpperCase(piece);
+	            int base = (move.from / 8) * 8;
+	            char rook = board.getPiece(move.to);
+
+	            board.setPiece(move.to, '.');
+	            board.setPiece(base + (move.castleKingSide ? 6 : 2), piece);
+	            board.setPiece(base + (move.castleKingSide ? 5 : 3), rook);
+
+	            if (whiteKing) {
+	                board.setWhiteKingSideCastle(false);
+	                board.setWhiteQueenSideCastle(false);
+	            } else {
+	                board.setBlackKingSideCastle(false);
+	                board.setBlackQueenSideCastle(false);
+	            }
+	            board.setEnPassantSquare(-1);
+	            board.setWhiteToMove(!board.isWhiteToMove());
+	            return;
+	        }
 	        
 	        //en-passant captures
 	        
@@ -408,19 +435,22 @@ public class MoveGenerator {
 	            board.setBlackQueenSideCastle(false);
 	        }
 
-	        if (move.from == 0 || move.to == 0) {
+	        int wqr = board.getCastleRookFile(true, false), wkr = board.getCastleRookFile(true, true);
+	        int bqr = 56 + board.getCastleRookFile(false, false), bkr = 56 + board.getCastleRookFile(false, true);
+
+	        if (move.from == wqr || move.to == wqr) {
 	            board.setWhiteQueenSideCastle(false);
 	        }
 
-	        if (move.from == 7 || move.to == 7) {
+	        if (move.from == wkr || move.to == wkr) {
 	            board.setWhiteKingSideCastle(false);
 	        }
 
-	        if (move.from == 56 || move.to == 56) {
+	        if (move.from == bqr || move.to == bqr) {
 	            board.setBlackQueenSideCastle(false);
 	        }
 	        
-	        if (move.from == 63 || move.to == 63) {
+	        if (move.from == bkr || move.to == bkr) {
 	            board.setBlackKingSideCastle(false);
 	        }
 	        

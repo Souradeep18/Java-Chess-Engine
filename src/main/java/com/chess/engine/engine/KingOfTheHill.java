@@ -10,7 +10,7 @@ import java.util.List;
  */
 public final class KingOfTheHill {
 
-    public static final String VARIANT_KING_OF_THE_HILL = "variant-king-of-the-hill";
+    public static final String VARIANT_KING_OF_THE_HILL = "variant-king of the hill";
 
     // d4, e4, d5, e5 (index 0 = a1 ... 63 = h8)
     public static final int[] HILL_SQUARES = {27, 28, 35, 36};

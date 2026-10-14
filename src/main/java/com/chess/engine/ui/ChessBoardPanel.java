@@ -272,7 +272,11 @@ public class ChessBoardPanel extends JPanel {
                 return;
             }
 
-            if (clickedPiece != '.' && isPieceOwnedBySideToMove(clickedPiece)) {
+            // Chess960: castling is played by clicking the king and then its own rook
+            Move castleTarget = highlightedMoves.get(square);
+            boolean castleOnRook = castleTarget != null && castleTarget.isCastle && board.isChess960();
+
+            if (clickedPiece != '.' && isPieceOwnedBySideToMove(clickedPiece) && !castleOnRook) {
                 selectPiece(square);
                 return;
             }
@@ -577,7 +581,10 @@ public class ChessBoardPanel extends JPanel {
 
                     char destinationPiece = board.getPiece(square);
 
-                    if (destinationPiece != '.' && isOpponentPiece(destinationPiece)) {
+                    Move highlighted = highlightedMoves.get(square);
+                    boolean castleOnRook = highlighted != null && highlighted.isCastle && board.isChess960();
+
+                    if (destinationPiece != '.' && (isOpponentPiece(destinationPiece) || castleOnRook)) {
                         button.setLegalCaptureRing(true);
                     } else {
                         button.setLegalMoveDot(true);

@@ -30,6 +30,11 @@ public class Board {
     private boolean kingOfTheHill = false;
     private boolean racingKings = false;
 
+    // Chess960: position number (-1 = none) and the start file of each castling rook (WK, WQ, BK, BQ)
+    private boolean chess960 = false;
+    private int chess960Id = -1;
+    private final int[] castleRookFile = {7, 0, 7, 0};
+
     // Three-Check: number of checks each side has delivered so far
     private int whiteChecks = 0;
     private int blackChecks = 0;
@@ -92,6 +97,9 @@ public class Board {
         this.antiChess = other.antiChess;
         this.kingOfTheHill = other.kingOfTheHill;
         this.racingKings = other.racingKings;
+        this.chess960 = other.chess960;
+        this.chess960Id = other.chess960Id;
+        System.arraycopy(other.castleRookFile, 0, this.castleRookFile, 0, 4);
         this.whiteChecks = other.whiteChecks;
         this.blackChecks = other.blackChecks;
     }
@@ -122,6 +130,9 @@ public class Board {
         antiChess = false;
         kingOfTheHill = false;
         racingKings = false;
+        chess960 = false;
+        chess960Id = -1;
+        castleRookFile[0] = 7; castleRookFile[1] = 0; castleRookFile[2] = 7; castleRookFile[3] = 0;
         whiteChecks = 0;
         blackChecks = 0;
         enPassantSquare = -1;
@@ -295,8 +306,20 @@ public class Board {
         char movingPiece = board[move.fromSquare];
 
         // Perform board updates
-        board[move.toSquare] = (move.promotionPiece != '.' && move.promotionPiece != '\0') ? move.promotionPiece : movingPiece;
-        board[move.fromSquare] = '.';
+        boolean castle960 = chess960 && move.isCastle;
+        if (castle960) {
+            // Chess960: the king moves onto its rook; both end on their normal castling squares
+            char rook = board[move.toSquare];
+            int base = (move.fromSquare / 8) * 8;
+            state.capturedPiece = '.';
+            board[move.fromSquare] = '.';
+            board[move.toSquare] = '.';
+            board[base + (move.castleKingSide ? 6 : 2)] = movingPiece;
+            board[base + (move.castleKingSide ? 5 : 3)] = rook;
+        } else {
+            board[move.toSquare] = (move.promotionPiece != '.' && move.promotionPiece != '\0') ? move.promotionPiece : movingPiece;
+            board[move.fromSquare] = '.';
+        }
 
         // En Passant handling
         if (move.isEnPassant) {
@@ -313,7 +336,7 @@ public class Board {
         }
 
         // Castling move updates
-        if (move.isCastle) {
+        if (move.isCastle && !chess960) {
             if (move.toSquare == 6) { board[7] = '.'; board[5] = 'R'; }
             else if (move.toSquare == 2) { board[0] = '.'; board[3] = 'R'; }
             else if (move.toSquare == 62) { board[63] = '.'; board[61] = 'r'; }
@@ -323,10 +346,12 @@ public class Board {
         // Update Castling Rights
         if (movingPiece == 'K') { whiteKingSideCastle = false; whiteQueenSideCastle = false; }
         if (movingPiece == 'k') { blackKingSideCastle = false; blackQueenSideCastle = false; }
-        if (move.fromSquare == 0 || move.toSquare == 0) whiteQueenSideCastle = false;
-        if (move.fromSquare == 7 || move.toSquare == 7) whiteKingSideCastle = false;
-        if (move.fromSquare == 56 || move.toSquare == 56) blackQueenSideCastle = false;
-        if (move.fromSquare == 63 || move.toSquare == 63) blackKingSideCastle = false;
+        int wkr = castleRookFile[0], wqr = castleRookFile[1];
+        int bkr = 56 + castleRookFile[2], bqr = 56 + castleRookFile[3];
+        if (move.fromSquare == wqr || move.toSquare == wqr) whiteQueenSideCastle = false;
+        if (move.fromSquare == wkr || move.toSquare == wkr) whiteKingSideCastle = false;
+        if (move.fromSquare == bqr || move.toSquare == bqr) blackQueenSideCastle = false;
+        if (move.fromSquare == bkr || move.toSquare == bkr) blackKingSideCastle = false;
 
         // Atomic chess: a capture blows up the capturer and everything around it (except pawns)
         if (atomic && (state.capturedPiece != '.' || move.isEnPassant)) {
@@ -373,8 +398,21 @@ public class Board {
             movedPiece = whiteToMove ? 'P' : 'p';
         }
 
-        board[move.fromSquare] = movedPiece;
-        board[move.toSquare] = state.capturedPiece;
+        boolean castle960 = chess960 && move.isCastle;
+        if (castle960) {
+            int base = (move.fromSquare / 8) * 8;
+            int kingDest = base + (move.castleKingSide ? 6 : 2);
+            int rookDest = base + (move.castleKingSide ? 5 : 3);
+            char king = board[kingDest];
+            char rook = board[rookDest];
+            board[kingDest] = '.';
+            board[rookDest] = '.';
+            board[move.fromSquare] = king;
+            board[move.toSquare] = rook;
+        } else {
+            board[move.fromSquare] = movedPiece;
+            board[move.toSquare] = state.capturedPiece;
+        }
 
         if (move.isEnPassant) {
             int capSq = whiteToMove ? move.toSquare - 8 : move.toSquare + 8;
@@ -382,7 +420,7 @@ public class Board {
             board[move.toSquare] = '.';
         }
 
-        if (move.isCastle) {
+        if (move.isCastle && !chess960) {
             if (move.toSquare == 6) { board[5] = '.'; board[7] = 'R'; }
             else if (move.toSquare == 2) { board[3] = '.'; board[0] = 'R'; }
             else if (move.toSquare == 62) { board[61] = '.'; board[63] = 'r'; }
@@ -569,6 +607,11 @@ public class Board {
     private void addCastlingMoves(int sq, List<Move> moves) {
         if (antiChess) return; // Castling disabled in Anti-Chess
 
+        if (chess960) {
+            Chess960.addCastlingMoves(this, sq, moves);
+            return;
+        }
+
         if (whiteToMove && sq == 4) {
             if (whiteKingSideCastle && board[7] == 'R' && board[5] == '.' && board[6] == '.'
                     && !isSquareAttackedBy(4, false) && !isSquareAttackedBy(5, false)
@@ -740,6 +783,19 @@ public class Board {
     public int getBlackChecks() { return blackChecks; }
     public void setWhiteChecks(int value) { whiteChecks = value; }
     public void setBlackChecks(int value) { blackChecks = value; }
+
+    public boolean isChess960() { return chess960; }
+    public void setChess960(boolean value) { this.chess960 = value; }
+    public int getChess960Id() { return chess960Id; }
+    public void setChess960Id(int id) { this.chess960Id = id; }
+
+    // Start file (0 = a ... 7 = h) of the rook that castles on the given side.
+    public int getCastleRookFile(boolean white, boolean kingSide) {
+        return castleRookFile[(white ? 0 : 2) + (kingSide ? 0 : 1)];
+    }
+    public void setCastleRookFile(boolean white, boolean kingSide, int file) {
+        castleRookFile[(white ? 0 : 2) + (kingSide ? 0 : 1)] = file;
+    }
 
     public boolean isRacingKings() { return racingKings; }
     public void setRacingKings(boolean value) {

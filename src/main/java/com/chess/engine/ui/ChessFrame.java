@@ -7,6 +7,7 @@ import com.chess.engine.engine.HordeChess;
 import com.chess.engine.engine.Move;
 import com.chess.engine.engine.MoveGenerator;
 import com.chess.engine.engine.AntiChess;
+import com.chess.engine.engine.Chess960;
 import com.chess.engine.engine.KingOfTheHill;
 import com.chess.engine.engine.RacingKings;
 import com.chess.engine.engine.ThreeCheck;
@@ -34,10 +35,13 @@ import java.util.Map;
 @SuppressWarnings("serial")
 public class ChessFrame extends JFrame {
 
-    // --- UI Components ---
+    // UI Components
     private final ChessBoardPanel boardPanel;
 
     private final JButton backButton;
+    private Chess960PositionBox chess960Box;
+    private JLabel navigationTitleLabel;
+    private JPanel navigationPanelRef;
     private final JButton forwardButton;
 
     private final JButton newGameButton;
@@ -196,7 +200,8 @@ public class ChessFrame extends JFrame {
                 ThreeCheck.VARIANT_THREE_CHECK,
                 AntiChess.VARIANT_ANTI_CHESS,
                 KingOfTheHill.VARIANT_KING_OF_THE_HILL,
-                RacingKings.VARIANT_RACING_KINGS});
+                RacingKings.VARIANT_RACING_KINGS,
+                Chess960.VARIANT_CHESS960});
         variantCombo.setMaximumSize(new Dimension(320, 32));
         variantCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
         variantCombo.setVisible(false);
@@ -359,12 +364,20 @@ public class ChessFrame extends JFrame {
 
         sidePanel.add(Box.createVerticalStrut(14));
 
+        // Chess960: position number box (board editor only; it takes the place of the move navigation)
+        chess960Box = new Chess960PositionBox();
+        chess960Box.setListener(this::onChess960NumberChanged);
+        chess960Box.setVisible(false);
+        sidePanel.add(chess960Box);
+
         // Navigation Controls
         JLabel navigationTitle = createSectionTitle("MOVE NAVIGATION");
+        navigationTitleLabel = navigationTitle;
         sidePanel.add(navigationTitle);
         sidePanel.add(Box.createVerticalStrut(8));
 
         JPanel navigationPanel = new JPanel(new GridLayout(1, 2, 8, 0));
+        navigationPanelRef = navigationPanel;
         navigationPanel.setOpaque(false);
 
         backButton = new JButton("<");
@@ -765,6 +778,7 @@ public class ChessFrame extends JFrame {
         updateCheckBoxes();
         syncCastlingRightsUI();
         recalculateMaterialScore();
+        updateChess960PanelVisibility();
 
         statusLabel.setText("Board Editor Active");
     }
@@ -890,6 +904,8 @@ public class ChessFrame extends JFrame {
             board.setKingOfTheHill(true);
         } else if (current != null && current.isRacingKings()) {
             RacingKings.setupStartingPosition(board);
+        } else if (current != null && current.isChess960()) {
+            Chess960.setupStartingPosition(board, chess960Box.getValue());
         }
 
         boardPanel.setBoard(board);
@@ -908,6 +924,7 @@ public class ChessFrame extends JFrame {
         boolean antiChess = board != null && board.isAntiChess();
         boolean kingOfTheHill = board != null && board.isKingOfTheHill();
         boolean racingKings = board != null && board.isRacingKings();
+        boolean chess960 = board != null && board.isChess960();
 
         String name = HordeChess.VARIANT_STANDARD;
         if (horde) {
@@ -922,6 +939,8 @@ public class ChessFrame extends JFrame {
             name = KingOfTheHill.VARIANT_KING_OF_THE_HILL;
         } else if (racingKings) {
             name = RacingKings.VARIANT_RACING_KINGS;
+        } else if (chess960) {
+            name = Chess960.VARIANT_CHESS960;
         }
 
         syncingUI = true;
@@ -932,6 +951,7 @@ public class ChessFrame extends JFrame {
         }
 
         updateVariantUI(horde);
+        updateChess960PanelVisibility();
     }
 
     //The user picked a variant: put that variant's starting position on the board.
@@ -947,6 +967,7 @@ public class ChessFrame extends JFrame {
         boolean antiChess = AntiChess.VARIANT_ANTI_CHESS.equals(chosen);
         boolean kingOfTheHill = KingOfTheHill.VARIANT_KING_OF_THE_HILL.equals(chosen);
         boolean racingKings = RacingKings.VARIANT_RACING_KINGS.equals(chosen);
+        boolean chess960 = Chess960.VARIANT_CHESS960.equals(chosen);
 
         // Standard and Atomic start from the normal position; Horde has its own
         Board board = new Board();
@@ -962,11 +983,44 @@ public class ChessFrame extends JFrame {
             board.setKingOfTheHill(true);
         } else if (racingKings) {
             RacingKings.setupStartingPosition(board);
+        } else if (chess960) {
+            Chess960.setupStartingPosition(board, chess960Box.getValue());
         }
 
         boardPanel.setBoard(board);
+        updateChess960PanelVisibility();
         updateVariantUI(horde);
         syncCastlingRightsUI();   // white castling boxes are disabled when White has no king
+        recalculateMaterialScore();
+    }
+
+    // Chess960: the number box is shown (instead of the move navigation) while a Chess960 board is edited.
+    private void updateChess960PanelVisibility() {
+        Board edited = boardPanel.getBoard();
+        boolean show = isEditorMode && edited != null && edited.isChess960();
+        chess960Box.setVisible(show);
+        navigationTitleLabel.setVisible(!show);
+        navigationPanelRef.setVisible(!show);
+        sidePanelRevalidate();
+    }
+
+    private void sidePanelRevalidate() {
+        Container parent = chess960Box.getParent();
+        if (parent != null) {
+            parent.revalidate();
+            parent.repaint();
+        }
+    }
+
+    // The number in the Chess960 box changed: set up that starting position.
+    private void onChess960NumberChanged(int number) {
+        if (!isEditorMode) {
+            return;
+        }
+        Board board = new Board();
+        Chess960.setupStartingPosition(board, number);
+        boardPanel.setBoard(board);
+        syncCastlingRightsUI();
         recalculateMaterialScore();
     }
 
@@ -1097,6 +1151,12 @@ public class ChessFrame extends JFrame {
         board.setBlackKingSideCastle(blackKingSideCb.isSelected());
         board.setBlackQueenSideCastle(blackQueenSideCb.isSelected());
 
+        if (board.isChess960()) {
+            // remember which rooks castle, and which numbered start this is (if it still is one)
+            Chess960.configureCastling(board);
+            board.setChess960Id(Chess960.matchesStart(board, chess960Box.getValue()) ? chess960Box.getValue() : -1);
+        }
+
         isEditorMode = false;
         selectedEditorPiece = '\0';
         updatePaletteHighlight();
@@ -1109,6 +1169,7 @@ public class ChessFrame extends JFrame {
 
         variantCombo.setVisible(false);
         gameSection.setVisible(true);
+        updateChess960PanelVisibility();
 
         setMainUIEnabled(true);
         boardEditorButton.setEnabled(true);
@@ -1575,9 +1636,15 @@ public class ChessFrame extends JFrame {
 
         activePlayerCombo.setSelectedIndex(currentBoard.isWhiteToMove() ? 0 : 1);
 
-        boolean whiteKingOnRank1 = (currentBoard.getPiece(4) == 'K');
-        boolean whiteKingRookOnRank1 = (currentBoard.getPiece(7) == 'R');
-        boolean whiteQueenRookOnRank1 = (currentBoard.getPiece(0) == 'R');
+        if (currentBoard.isChess960()) {
+            Chess960.configureCastling(currentBoard);   // the rooks may have been moved in the editor
+        }
+        boolean c960 = currentBoard.isChess960();
+
+        boolean whiteKingOnRank1 = c960 ? Chess960.castlingRookFile(currentBoard, true, true) >= 0
+                || Chess960.castlingRookFile(currentBoard, true, false) >= 0 : (currentBoard.getPiece(4) == 'K');
+        boolean whiteKingRookOnRank1 = c960 ? Chess960.castlingRookFile(currentBoard, true, true) >= 0 : (currentBoard.getPiece(7) == 'R');
+        boolean whiteQueenRookOnRank1 = c960 ? Chess960.castlingRookFile(currentBoard, true, false) >= 0 : (currentBoard.getPiece(0) == 'R');
 
         boolean noCastling = currentBoard.isAntiChess() || currentBoard.isRacingKings(); // no castling in these variants
 
@@ -1587,9 +1654,10 @@ public class ChessFrame extends JFrame {
         whiteKingSideCb.setSelected(whiteKingSideCb.isEnabled() && currentBoard.canWhiteCastleKingSide());
         whiteQueenSideCb.setSelected(whiteQueenSideCb.isEnabled() && currentBoard.canWhiteCastleQueenSide());
 
-        boolean blackKingOnRank8 = (currentBoard.getPiece(60) == 'k');
-        boolean blackKingRookOnRank8 = (currentBoard.getPiece(63) == 'r');
-        boolean blackQueenRookOnRank8 = (currentBoard.getPiece(56) == 'r');
+        boolean blackKingOnRank8 = c960 ? Chess960.castlingRookFile(currentBoard, false, true) >= 0
+                || Chess960.castlingRookFile(currentBoard, false, false) >= 0 : (currentBoard.getPiece(60) == 'k');
+        boolean blackKingRookOnRank8 = c960 ? Chess960.castlingRookFile(currentBoard, false, true) >= 0 : (currentBoard.getPiece(63) == 'r');
+        boolean blackQueenRookOnRank8 = c960 ? Chess960.castlingRookFile(currentBoard, false, false) >= 0 : (currentBoard.getPiece(56) == 'r');
 
         blackKingSideCb.setEnabled(!noCastling && blackKingOnRank8 && blackKingRookOnRank8);
         blackQueenSideCb.setEnabled(!noCastling && blackKingOnRank8 && blackQueenRookOnRank8);
@@ -2022,6 +2090,9 @@ public class ChessFrame extends JFrame {
         } else if (inCheck) {
             gameOver = false;
             statusLabel.setText((whiteToMove ? "White" : "Black") + " is in CHECK");
+        } else if (board.isChess960() && board.getChess960Id() >= 0) {
+            gameOver = false;
+            statusLabel.setText((whiteToMove ? "White" : "Black") + " to play, " + board.getChess960Id() + " position");
         } else {
             gameOver = false;
             statusLabel.setText((whiteToMove ? "White" : "Black") + " to move");
@@ -2109,8 +2180,8 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /*
-      Racing Kings: first king to the 8th rank wins; if White arrives first and Black follows, it is a draw.
+    /**
+     * Racing Kings: first king to the 8th rank wins; if White arrives first and Black follows, it is a draw.
      */
     private void updateRacingKingsStatus(Board board, boolean whiteToMove) {
         boolean gameOver = true;

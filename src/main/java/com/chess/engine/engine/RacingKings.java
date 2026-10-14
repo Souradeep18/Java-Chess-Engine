@@ -10,7 +10,7 @@ import java.util.List;
  */
 public final class RacingKings {
 
-    public static final String VARIANT_RACING_KINGS = "variant-racing-kings";
+    public static final String VARIANT_RACING_KINGS = "variant-racing kings";
 
     public enum Result {
         ONGOING,
