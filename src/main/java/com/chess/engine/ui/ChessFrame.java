@@ -1688,18 +1688,20 @@ public class ChessFrame extends JFrame {
     private void makeEngineMove() {
         if (isEditorMode || gameIsOver) return;
 
-        // Optional: Indicate to the user that the engine is thinking
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
 
-        // Clone board state off-thread to prevent UI mutation conflicts
         Board searchBoard = currentNode.board.copy();
 
-        // SwingWorker to keep UI responsive and prevent EDT freezing
+        // every position of the current line, so the engine can avoid / seek repetitions
+        final List<Board> history = new ArrayList<>();
+        for (MoveNode n = currentNode; n != null; n = n.parent) {
+            history.add(n.board.copy());
+        }
+
         SwingWorker<Move, Void> worker = new SwingWorker<Move, Void>() {
             @Override
             protected Move doInBackground() throws Exception {
-                // Depth 16 with a 5-second hard cutoff limit
-                return engine.findBestMove(searchBoard, 16, 5000);
+                return engine.findBestMove(searchBoard, 16, 5000, history);
             }
 
             @Override
@@ -1716,9 +1718,9 @@ public class ChessFrame extends JFrame {
                         recordMove(currentNode.board, newBoard, bestMove);
                     } else {
                         JOptionPane.showMessageDialog(
-                            ChessFrame.this, 
-                            "No legal moves available.", 
-                            "Game Over", 
+                            ChessFrame.this,
+                            "No legal moves available.",
+                            "Game Over",
                             JOptionPane.INFORMATION_MESSAGE
                         );
                     }
@@ -1730,7 +1732,6 @@ public class ChessFrame extends JFrame {
 
         worker.execute();
     }
-
     private void handleManualMove(Board before, Board after) {
         if (gameIsOver) return;
         Move move = findMoveBetween(before, after);

@@ -149,7 +149,7 @@ public final class Chess960 {
         }
     }
 
-    // ------------------------------------------------------------------ move generation
+    //  move generation
 
     // Adds the castling moves of the king on kingSq (king-onto-rook encoding).
     public static void addCastlingMoves(Board b, int kingSq, List<Move> moves) {
