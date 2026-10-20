@@ -61,11 +61,11 @@ public class ChessBoardPanel extends JPanel {
     private final Map<Integer, Move> highlightedMoves =
             new HashMap<>();
 
-    // ----- Board editor support -----
+    // Board editor support 
 
-    /**
-     * Callback used by the board editor. The panel reports raw square
-     * clicks and piece drops; the owner decides what they mean.
+    /*
+      Callback used by the board editor. The panel reports raw square
+      clicks and piece drops; the owner decides what they mean.
      */
     public interface PieceEditListener {
         void onSquareClicked(int square);

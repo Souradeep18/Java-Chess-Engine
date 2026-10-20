@@ -60,10 +60,10 @@ public class Chess960PositionBox extends JPanel {
                         + current.substring(offset + length);
 
                 if (!proposed.matches("\\d{0,3}")) {
-                    return;                                  // digits only
+                    return;// digits only
                 }
                 if (!proposed.isEmpty() && Integer.parseInt(proposed) > Chess960.MAX_POSITION) {
-                    return;                                  // never above 959
+                    return; // never above 959
                 }
 
                 super.replace(fb, offset, length, text, attrs);
@@ -123,10 +123,46 @@ public class Chess960PositionBox extends JPanel {
         arrows.addMouseListener(hover);
         arrows.addMouseWheelListener(hover);
 
-        // --- dice button
-        JButton dice = new JButton("⚅");
-        dice.setFont(new Font("Segoe UI Symbol", Font.PLAIN, 26));
+        
+     // Create a custom Icon for the 6-sided die for chess960 random position
+        Icon royalBlueDiceIcon = new Icon() {
+            @Override
+            public void paintIcon(Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                // Royal Blue die body
+                g2.setColor(new Color(65, 105, 225)); // Royal Blue
+                g2.fillRoundRect(x, y, 25, 25, 6, 6);
+
+                // the 6 White dots
+                g2.setColor(Color.WHITE);
+                int dotSize = 4;
+                
+                // Left column dots
+                g2.fillOval(x + 5,  y + 5,  dotSize, dotSize);
+                g2.fillOval(x + 5,  y + 11, dotSize, dotSize);
+                g2.fillOval(x + 5,  y + 17, dotSize, dotSize);
+                
+                // Right column dots
+                g2.fillOval(x + 17, y + 5,  dotSize, dotSize);
+                g2.fillOval(x + 17, y + 11, dotSize, dotSize);
+                g2.fillOval(x + 17, y + 17, dotSize, dotSize);
+
+                g2.dispose();
+            }
+
+            @Override
+            public int getIconWidth() { return 26; }
+
+            @Override
+            public int getIconHeight() { return 26; }
+        };
+
+        JButton dice = new JButton(royalBlueDiceIcon);
         dice.setFocusPainted(false);
+        dice.setContentAreaFilled(false); // Removes the default rectangular button border/background
+        dice.setBorderPainted(false);      // Makes the icon look like a clean standalone die
         dice.setMargin(new Insets(0, 4, 0, 4));
         dice.setToolTipText("Random position");
         dice.setPreferredSize(new Dimension(44, 38));
@@ -140,6 +176,7 @@ public class Chess960PositionBox extends JPanel {
         row.add(dice);
         row.setMaximumSize(new Dimension(320, 42));
         add(row);
+
     }
 
     public void setListener(IntConsumer listener) {

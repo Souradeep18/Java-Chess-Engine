@@ -1578,9 +1578,14 @@ public class ChessFrame extends JFrame {
         return panel;
     }
 
+    //Red colour for checks given
     private void fillCheckMarks(JLabel[] marks, int checks) {
         for (int i = 0; i < marks.length; i++) {
-            marks[i].setText(i < checks ? "❌" : "➕");
+            if (i < checks) {
+                marks[i].setText("<html><font color='red'>❌</font></html>");
+            } else {
+                marks[i].setText("➕");
+            }
         }
     }
 
@@ -2146,9 +2151,9 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /**
-     * Horde chess: White wins by checkmating Black, Black wins by capturing every white piece.
-     * (Insufficient-material draws do not apply: White has no king.)
+    /*
+      Horde chess: White wins by checkmating Black, Black wins by capturing every white piece.
+      (Insufficient-material draws do not apply: White has no king.)
      */
     private void updateHordeStatus(Board board, boolean whiteToMove, boolean inCheck) {
         boolean gameOver = true;
@@ -2181,8 +2186,8 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /**
-     * Racing Kings: first king to the 8th rank wins; if White arrives first and Black follows, it is a draw.
+    /*
+      Racing Kings: first king to the 8th rank wins; if White arrives first and Black follows, it is a draw.
      */
     private void updateRacingKingsStatus(Board board, boolean whiteToMove) {
         boolean gameOver = true;
@@ -2218,9 +2223,9 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /**
-     * King of the Hill: a king on d4/e4/d5/e5 wins, otherwise normal chess rules.
-     * (Insufficient-material draws do not apply: a lone king can still walk to the hill.)
+    /*
+     King of the Hill: a king on d4/e4/d5/e5 wins, otherwise normal chess rules.
+     (Insufficient-material draws do not apply: a lone king can still walk to the hill.)
      */
     private void updateKingOfTheHillStatus(Board board, boolean whiteToMove, boolean inCheck) {
         boolean gameOver = true;
@@ -2259,8 +2264,8 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /**
-     * Anti-Chess: whoever loses all their pieces (or is stalemated) WINS.
+    /*
+      Anti-Chess: whoever loses all their pieces (or is stalemated) WINS.
      */
     private void updateAntiChessStatus(Board board, boolean whiteToMove) {
         boolean gameOver = true;
@@ -2293,8 +2298,8 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /**
-     * Three-Check: the first side to give three checks wins (checkmate also wins).
+    /*
+      Three-Check: the first side to give three checks wins (checkmate also wins).
      */
     private void updateThreeCheckStatus(Board board, boolean whiteToMove, boolean inCheck) {
         boolean gameOver = true;
@@ -2334,10 +2339,10 @@ public class ChessFrame extends JFrame {
         applyGameOverState(gameOver);
     }
 
-    /**
-     * Once the game is over (checkmate or any kind of stalemate) neither the user
-     * nor the engine may move. Going back one move re-runs updateStatus(), which
-     * enables everything again if the earlier position is not game over.
+    /*
+      Once the game is over (checkmate or any kind of stalemate) neither the user
+      nor the engine may move. Going back one move re-runs updateStatus(), which
+      enables everything again if the earlier position is not game over.
      */
     private void applyGameOverState(boolean gameOver) {
         gameIsOver = gameOver;
@@ -2553,7 +2558,7 @@ public class ChessFrame extends JFrame {
         };
     }
 
-    // --- HTML Notation & Variation Rendering ---
+    //HTML Notation & Variation Rendering
     private void updateNotationDisplay() {
         nodeMap.clear();
         nodeCounter = 0;
@@ -2624,7 +2629,7 @@ public class ChessFrame extends JFrame {
         renderMoveTreeHTML(mainChild, html, isMainLine);
     }
 
-    // --- Context Menu Operations ---
+    // Context Menu Operations
     private void showContextMenuAtPoint(Point point) {
         int pos = notationPane.viewToModel2D(point);
         targetContextMenuNode = null;

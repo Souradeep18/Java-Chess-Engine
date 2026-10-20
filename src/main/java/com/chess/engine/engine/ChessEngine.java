@@ -160,7 +160,7 @@ public class ChessEngine {
 
         int extensions = 0;
         final long baseTime = maxTimeMillis;
-        int bestMateScore = 0; // a proven forced mate for the engine found so far (shortest one wins)
+        int bestMateScore = 0;          // a proven forced mate for the engine found so far (shortest one wins)
         Move bestMateMove = null;
 
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
@@ -1207,6 +1207,7 @@ public class ChessEngine {
             return Arrays.copyOf(tmp, n);
         }
 
+        private int materialOnly;      // White's material minus Black's, without any positional term
         private final int[] sq = new int[64];
         private final int[] kingSq = new int[2];
         private int side;
@@ -1352,9 +1353,13 @@ public class ChessEngine {
             return Math.max(Math.abs((a & 7) - (b & 7)), Math.abs((a >> 3) - (b >> 3)));
         }
 
+        private static final int POS_KNEE = 80;     // centipawns of "positional" score that count in full
+        private static final int POS_SLOPE = 40;    // percent of the excess that still counts
+
         private int evaluate() {
             int phase = 0;
             int score = 0;
+            materialOnly = 0;
 
             for (int c = 0; c < 2; c++) {
                 Arrays.fill(pawnCnt[c], 0);
@@ -1404,6 +1409,7 @@ public class ChessEngine {
                 if (t != K) {
                     int v = VALUE[t] + PST[t][c == 0 ? s ^ 56 : s];
                     score += c == 0 ? v : -v;
+                    materialOnly += c == 0 ? VALUE[t] : -VALUE[t];
                 }
             }
             if (phase > 24) phase = 24;
@@ -1925,6 +1931,19 @@ public class ChessEngine {
                 }
             }
 
+            // Soft cap on everything that is not material (piece-square tables, mobility, activity, king attack,
+            // structure): beyond POS_KNEE only POS_SLOPE percent of the excess counts. Without it a lead in
+            // development or activity "pays" for a whole piece, and the engine walks into positions that a deeper
+            // search (or a stronger engine) shows to be simply a piece down.
+            {
+                int pos = score - materialOnly;
+                int ap = Math.abs(pos);
+                if (ap > POS_KNEE) {
+                    int capped = POS_KNEE + (ap - POS_KNEE) * POS_SLOPE / 100;
+                    score = materialOnly + (pos < 0 ? -capped : capped);
+                }
+            }
+
             // Queen endings (queen v pawns / rook / minor piece, queen and pawn v queen)
             score = queenEndgamePatterns(score, pawns0, pawns1);
 
@@ -2210,7 +2229,7 @@ public class ChessEngine {
             return strong;
         }
 
-        // Queen against a minor piece
+        // ---- Queen against a minor piece -----------------------------------------------------------
         private int queenAgainstMinorPiece(int st, int wk, int stP, int wkP, int strong) {
             if (wkP == 0 || stP > 0) {
                 return strong;
@@ -2386,7 +2405,7 @@ public class ChessEngine {
             int total = pw0 + pw1;
             int val = 0; // positive = good for the bishop
 
-            //how open is the position? pawns standing head to head (central ones count more)
+            // --- how open is the position? pawns standing head to head (central ones count more)
             int blocked = 0, blockedCentral = 0, targets = 0, fixedOnBishopColour = 0;
             boolean low = false, high = false;
             for (int s = 0; s < 64; s++) {
@@ -2668,11 +2687,11 @@ public class ChessEngine {
             return score;
         }
 
-        /*
-          A far-advanced passed pawn that nothing of the opponent can stop any more (the king is outside the
-          square, no rook or queen watches the file or the squares in front of the pawn, no knight or bishop is
-          near enough). In rook and minor-piece endings these pawn races decide the game, and a search that
-          stops a few plies too early otherwise believes the pawn can still be caught.
+        /**
+         * A far-advanced passed pawn that nothing of the opponent can stop any more (the king is outside the
+         * square, no rook or queen watches the file or the squares in front of the pawn, no knight or bishop is
+         * near enough). In rook and minor-piece endings these pawn races decide the game, and a search that
+         * stops a few plies too early otherwise believes the pawn can still be caught.
          */
         private int runawayPassedPawn(int c, int s, int f, int rr) {
             int en = 1 - c;
