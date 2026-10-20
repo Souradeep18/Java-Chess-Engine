@@ -146,15 +146,31 @@ public class Board {
         return zobristKey;
     }
 
+    private static final long[] ZOBRIST_FLAT = new long[64 * 12];
+    private static final int[] PIECE_INDEX = new int[128];
+
+    static {
+        // same values as ZOBRIST_PIECES (hash keys do not change), laid out for fast access
+        for (int sq = 0; sq < 64; sq++) {
+            for (int p = 0; p < 12; p++) {
+                ZOBRIST_FLAT[sq * 12 + p] = ZOBRIST_PIECES[sq][p][0];
+            }
+        }
+        String order = "PNBRQKpnbrqk";
+        for (int i = 0; i < order.length(); i++) {
+            PIECE_INDEX[order.charAt(i)] = i;
+        }
+    }
+
     public void recalculateZobristKey() {
-        zobristKey = 0L;
+        long key = 0L;
         for (int sq = 0; sq < 64; sq++) {
             char p = board[sq];
             if (p != '.') {
-                int pIdx = pieceToZobristIndex(p);
-                zobristKey ^= ZOBRIST_PIECES[sq][pIdx][0];
+                key ^= ZOBRIST_FLAT[sq * 12 + PIECE_INDEX[p & 127]];
             }
         }
+        zobristKey = key;
         if (!whiteToMove) {
             zobristKey ^= ZOBRIST_SIDE;
         }
@@ -459,16 +475,7 @@ public class Board {
         if (kingOfTheHill && KingOfTheHill.isGameWon(this)) {
             return new ArrayList<>(); // a king is on the hill: the game is over
         }
-        List<Move> pseudoMoves = generatePseudoMoves(false, false);
-        List<Move> legalMoves = new ArrayList<>();
-
-        for (Move m : pseudoMoves) {
-            makeMove(m);
-            if (moverIsSafe()) {
-                legalMoves.add(m);
-            }
-            undoMove(m);
-        }
+        List<Move> legalMoves = filterLegal(generatePseudoMoves(false, false));
 
         // Filter mandatory captures for Anti-Chess
         if (antiChess) {
@@ -485,17 +492,55 @@ public class Board {
         if (kingOfTheHill && KingOfTheHill.isGameWon(this)) {
             return new ArrayList<>(); // a king is on the hill: the game is over
         }
-        List<Move> pseudoCaptures = generatePseudoMoves(true, false);
-        List<Move> legalCaptures = new ArrayList<>();
+        return filterLegal(generatePseudoMoves(true, false));
+    }
 
-        for (Move m : pseudoCaptures) {
+    /*
+     Keeps the legal moves of a pseudo-legal list. Making and unmaking every move to see whether the king is
+     left in check is the expensive way; when the side to move is not in check, only a king move, an en-passant
+     capture or a move of a piece that stands on a line with its own king can expose the king - every other move
+     is legal without any test.
+     */
+    private List<Move> filterLegal(List<Move> pseudo) {
+        List<Move> legal = new ArrayList<>(pseudo.size());
+
+        boolean fast = !atomic && !antiChess && !racingKings;
+        int ksq = -1;
+        boolean inCheck = false;
+        if (fast) {
+            char king = whiteToMove ? 'K' : 'k';
+            int kings = 0;
+            for (int sq = 0; sq < 64; sq++) {
+                if (board[sq] == king) {
+                    ksq = sq;
+                    kings++;
+                }
+            }
+            if (kings != 1) {
+                fast = false; // board editor positions / Horde: use the plain test
+            } else {
+                inCheck = isInCheck(whiteToMove);
+            }
+        }
+        int kf = ksq & 7;
+        int kr = ksq >> 3;
+
+        for (Move m : pseudo) {
+            if (fast && !inCheck && !m.enPassant && m.from != ksq) {
+                int df = (m.from & 7) - kf;
+                int dr = (m.from >> 3) - kr;
+                if (df != 0 && dr != 0 && df != dr && df != -dr) {
+                    legal.add(m); // not on a line with the king: cannot be pinned
+                    continue;
+                }
+            }
             makeMove(m);
             if (moverIsSafe()) {
-                legalCaptures.add(m);
+                legal.add(m);
             }
             undoMove(m);
         }
-        return legalCaptures;
+        return legal;
     }
 
     public List<Move> generateQuietChecks() {

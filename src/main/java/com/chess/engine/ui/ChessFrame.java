@@ -2349,14 +2349,14 @@ public class ChessFrame extends JFrame {
         }
     }
 
-    /**
-     * Insufficient mating material (a draw, whoever is to move):
-     *  - king against king
-     *  - king against king + knight, or king against king + bishop (either colour)
-     *  - king + bishop against king + knight (one side has a bishop, the other a knight)
-     *  - only bishops left, and all of them (of both colours) stand on squares of the
-     *    same colour, e.g. king + light-squared bishop against king + light-squared bishop
-     * Any pawn, rook or queen on the board means there is still mating material.
+    /*
+     Insufficient mating material (a draw, whoever is to move):
+      - king against king
+      - king against king + knight, or king against king + bishop (either colour)
+      - king + bishop against king + knight (one side has a bishop, the other a knight)
+      - only bishops left, and all of them (of both colours) stand on squares of the
+        same colour, e.g. king + light-squared bishop against king + light-squared bishop
+      Any pawn, rook or queen on the board means there is still mating material.
      */
     private static boolean isInsufficientMaterial(Board board) {
         int whiteMinors = 0;

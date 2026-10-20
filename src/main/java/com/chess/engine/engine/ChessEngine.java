@@ -16,7 +16,20 @@ public class ChessEngine {
     private static final int TT_MASK = TT_SIZE - 1;
 
     // Pruning margins
-    private static final int[] FUTILITY_MARGIN = {0, 160, 320};
+    private static final int[] FUTILITY_MARGIN = {0, 160, 320, 480};
+    private static final int NO_EVAL = Integer.MIN_VALUE;
+    private final int[] evalStack = new int[MAX_PLY + 4];
+    private static final int[][] LMR = new int[64][64];
+    private static final int[] LMP_IMPROVING = {0, 8, 12, 18, 99};
+    private static final int[] LMP_STEADY = {0, 5, 8, 12, 99};
+
+    static {
+        for (int d = 1; d < 64; d++) {
+            for (int m = 1; m < 64; m++) {
+                LMR[d][m] = (int) (0.6 + Math.log(d) * Math.log(m) / 3.0);
+            }
+        }
+    }
     private static final int RFP_MARGIN = 130;
 
     // TT Entry Flags
@@ -81,6 +94,26 @@ public class ChessEngine {
         Arrays.fill(tt, null);
     }
 
+    private String tableSignature = "";
+
+    /*
+     The transposition table and the evaluation cache are NOT thrown away between the moves of a game: what
+     the previous search learned about the positions that are still reachable (typically the engine's own
+     principal variation, two plies shorter) is exactly what the next search needs first. They are cleared
+     when the variant or the side the engine plays changes, because their contents would be wrong then.
+     */
+    private void prepareTables(Board board) {
+        String sig = (board.isAtomic() ? "A" : "") + (board.isAntiChess() ? "N" : "") + (board.isRacingKings() ? "R" : "")
+                + (board.isThreeCheck() ? "T" : "") + (board.isKingOfTheHill() ? "K" : "") + (board.isHorde() ? "H" : "")
+                + (board.isChess960() ? "9" : "") + (board.isWhiteToMove() ? "w" : "b");
+        // side to move at the root is the engine's side only on the engine's own turn; that is what we compare
+        if (!sig.equals(tableSignature)) {
+            ttClear();
+            evalCacheClear();
+            tableSignature = sig;
+        }
+    }
+
     private static boolean standardLike(Board b) {
         return !(b.isAtomic() || b.isAntiChess() || b.isRacingKings()
                 || b.isThreeCheck() || b.isKingOfTheHill() || b.isHorde());
@@ -109,7 +142,7 @@ public class ChessEngine {
 
         clearKillerMoves();
         clearHistory();
-        ttClear();
+        prepareTables(board);
 
         gameHistory.clear();
         if (previousPositions != null) {
@@ -125,8 +158,14 @@ public class ChessEngine {
         int prevScore = 0;
         boolean havePrev = false;
 
+        int extensions = 0;
+        final long baseTime = maxTimeMillis;
+        int bestMateScore = 0; // a proven forced mate for the engine found so far (shortest one wins)
+        Move bestMateMove = null;
+
         for (int currentDepth = 1; currentDepth <= maxDepth; currentDepth++) {
             int score;
+            Move previousBest = bestMoveOverall;
 
             if (currentDepth >= 5 && havePrev && Math.abs(prevScore) < CHECKMATE_SCORE - 200) {
                 int delta = 35;
@@ -154,6 +193,9 @@ public class ChessEngine {
                 if (currentDepth > 1 && bestMoveThisRootSearch != null) {
                     bestMoveOverall = bestMoveThisRootSearch;
                 }
+                if (bestMateMove != null && !(bestMoveThisRootSearch != null && score > bestMateScore)) {
+                    bestMoveOverall = bestMateMove;
+                }
                 break;
             }
 
@@ -166,6 +208,29 @@ public class ChessEngine {
                 }
             }
 
+            // A forced mate that has been found is kept: pruning in a later iteration may hide it, and a shorter
+            // mate may still be found, so the search goes on until its depth covers the mate (see below).
+            if (score > CHECKMATE_SCORE - 200) {
+                if (score > bestMateScore) {
+                    bestMateScore = score;
+                    bestMateMove = bestMoveOverall;
+                }
+            } else if (bestMateMove != null) {
+                bestMoveOverall = bestMateMove;
+                score = bestMateScore;
+            }
+
+            // Unstable result (the score fell, or the best move changed): this is where sharp positions are
+            // misjudged, so think half as long again - once per move.
+            // (a late change of the best move is the typical sign of a horizon effect - e.g. a pawn grab that looks
+            // good at depth 9 and bad at depth 10 - so it may extend twice, by half the base time each time)
+            boolean unstable = havePrev && (score < prevScore - 40
+                    || (previousBest != null && bestMoveOverall != null && !bestMoveOverall.equals(previousBest)));
+            if (unstable && currentDepth >= 6 && extensions < 2) {
+                maxTimeMillis += baseTime / 2;
+                extensions++;
+            }
+
             prevScore = score;
             havePrev = true;
             contempt = contemptFor(score);
@@ -173,7 +238,11 @@ public class ChessEngine {
             System.out.println("info depth " + currentDepth + " score " + score + " nodes " + nodes
                     + " time " + (System.currentTimeMillis() - startTime) + "ms");
 
-            if (Math.abs(score) > CHECKMATE_SCORE - 200) {
+            // Stopping at the first mate that shows up gives a long mate when a short one exists (reductions can
+            // hide the short one at the depth where the first mate is seen). A mate in N plies is proven to be the
+            // shortest once the search has reached depth N, so go on until then (when being mated: until the
+            // longest defence has been found).
+            if (Math.abs(score) > CHECKMATE_SCORE - 200 && currentDepth >= CHECKMATE_SCORE - Math.abs(score)) {
                 break;
             }
         }
@@ -294,26 +363,37 @@ public class ChessEngine {
         boolean evalKnown = false;
         int staticEval = 0;
 
-        if (ply > 0 && !inCheck && !pvNode && depth <= 3 && standardLike(board)) {
+        evalStack[ply] = NO_EVAL;
+        if (ply > 0 && !inCheck && standardLike(board)) {
             staticEval = evaluate(board);
             evalKnown = true;
+            evalStack[ply] = staticEval;
+        }
+        boolean improving = evalKnown && ply >= 2 && evalStack[ply - 2] != NO_EVAL && staticEval > evalStack[ply - 2];
 
-            if (hasNonPawnMaterial(board)
-                    && Math.abs(beta) < CHECKMATE_SCORE - 200
-                    && staticEval - RFP_MARGIN * depth >= beta) {
-                return staticEval - RFP_MARGIN * depth;
-            }
+        if (evalKnown && !pvNode && depth <= 4
+                && hasNonPawnMaterial(board)
+                && Math.abs(beta) < CHECKMATE_SCORE - 200
+                && staticEval - RFP_MARGIN * depth + (improving ? 0 : 0) >= beta) {
+            return staticEval - RFP_MARGIN * depth;
         }
 
-        boolean futilityOk = evalKnown
-                && depth <= 2
+        boolean futilityOk = evalKnown && !pvNode
+                && depth <= 3
                 && Math.abs(alpha) < CHECKMATE_SCORE - 200
                 && staticEval + FUTILITY_MARGIN[depth] <= alpha;
 
+        // Internal iterative reduction: with no stored best move the ordering is poor, so search shallower first
+        if (!inCheck && searchDepth >= 5 && ply > 0 && (ttEntry == null || ttEntry.bestMove == null)) {
+            searchDepth--;
+        }
+
         if (allowNull && !inCheck && searchDepth >= 3 && hasNonPawnMaterial(board)
-                && !board.isAntiChess() && !board.isRacingKings()) {
+                && !board.isAntiChess() && !board.isRacingKings()
+                && (evalKnown ? staticEval : evaluate(board)) >= beta) {
             board.makeNullMove();
             int R = searchDepth >= 6 ? 3 : 2;
+            R = Math.min(R, searchDepth - 1);
             int nullScore = -alphaBeta(board, searchDepth - 1 - R, ply + 1, -beta, -beta + 1, false);
             board.undoNullMove();
 
@@ -347,6 +427,10 @@ public class ChessEngine {
         Move bestMoveLocal = null;
         int maxScore = -INFINITY;
         boolean lmrAllowed = !board.isAntiChess();
+        boolean lmpOk = evalKnown && !pvNode && depth <= 4 && Math.abs(alpha) < CHECKMATE_SCORE - 200;
+        int lmpLimit = depth <= 4 ? (improving ? LMP_IMPROVING[depth] : LMP_STEADY[depth]) : 999;
+        Move[] triedQuiets = new Move[64];
+        int nTried = 0;
 
         for (int i = 0; i < legalMoves.size(); i++) {
             pickBest(legalMoves, scores, i);
@@ -356,7 +440,8 @@ public class ChessEngine {
             boolean seventh = ply < MAX_PLY && pawnToSeventh(board, move);
             boolean killer = ply < MAX_PLY && (move.equals(killerMoves[ply][0]) || move.equals(killerMoves[ply][1]));
             boolean reducible = lmrAllowed && quiet && !seventh && !inCheck && i >= 3 && searchDepth >= 3;
-            boolean prunableMove = futilityOk && quiet && !seventh && i > 0;
+            boolean lateQuiet = lmpOk && quiet && !seventh && !killer && i >= lmpLimit && lmrAllowed;
+            boolean prunableMove = (futilityOk && quiet && !seventh && i > 0) || lateQuiet;
 
             board.makeMove(move);
 
@@ -375,8 +460,11 @@ public class ChessEngine {
             } else {
                 int reduction = 0;
                 if (reducible && !givesCheck) {
-                    reduction = (i >= 6 && searchDepth >= 5) ? 2 : 1;
-                    if (killer) reduction = Math.max(0, reduction - 1);
+                    reduction = LMR[Math.min(searchDepth, 63)][Math.min(i, 63)];
+                    if (pvNode) reduction--;
+                    if (improving) reduction--;
+                    if (killer || history[side][move.from][move.to] > 3000) reduction--;
+                    if (reduction < 0) reduction = 0;
                     if (newDepth - reduction < 1) reduction = Math.max(0, newDepth - 1);
                 }
 
@@ -401,11 +489,18 @@ public class ChessEngine {
                 }
             }
 
+            if (quiet && nTried < 64) triedQuiets[nTried++] = move;
+
             alpha = Math.max(alpha, score);
             if (alpha >= beta) {
                 if (quiet && ply < MAX_PLY) {
                     storeKillerMove(move, ply);
                     updateHistory(side, move, searchDepth);
+                    for (int q = 0; q < nTried - 1; q++) {
+                        Move bad = triedQuiets[q];
+                        int hv = history[side][bad.from][bad.to] - searchDepth * searchDepth;
+                        history[side][bad.from][bad.to] = Math.max(hv, -6000);
+                    }
                 }
                 break;
             }
@@ -503,8 +598,7 @@ public class ChessEngine {
                 if (standPat + victim + 200 < alpha) continue;
 
                 int attacker = getPieceValue(board.getPieceTypeAt(move.from));
-                if (attacker > victim + 50
-                        && MoveGenerator.isSquareAttacked(board, move.to, !board.isWhiteToMove())) {
+                if (attacker > victim + 50 && see(board, move) < 0) {
                     continue;
                 }
             }
@@ -522,6 +616,115 @@ public class ChessEngine {
         return alpha;
     }
 
+
+    //Static exchange evaluation: the material outcome of the capture sequence on the target square.
+    private static int seeValue(char p) {
+        switch (Character.toUpperCase(p)) {
+            case 'P': return 100;
+            case 'N': return 320;
+            case 'B': return 330;
+            case 'R': return 500;
+            case 'Q': return 900;
+            case 'K': return 20000;
+            default: return 0;
+        }
+    }
+
+    private static final int[][] SEE_KNIGHT = {{2,1},{1,2},{-1,2},{-2,1},{-2,-1},{-1,-2},{1,-2},{2,-1}};
+    private static final int[][] SEE_DIAG = {{1,1},{1,-1},{-1,1},{-1,-1}};
+    private static final int[][] SEE_ORTH = {{1,0},{-1,0},{0,1},{0,-1}};
+
+    /** The square of the least valuable piece of the given colour that attacks 'to' on the array b, or -1. */
+    private static int leastAttacker(char[] b, int to, boolean white) {
+        int tr = to >> 3, tf = to & 7;
+        char pawn = white ? 'P' : 'p';
+        int pr = white ? tr - 1 : tr + 1;
+        if (pr >= 0 && pr < 8) {
+            if (tf > 0 && b[pr * 8 + tf - 1] == pawn) return pr * 8 + tf - 1;
+            if (tf < 7 && b[pr * 8 + tf + 1] == pawn) return pr * 8 + tf + 1;
+        }
+        char knight = white ? 'N' : 'n';
+        for (int[] v : SEE_KNIGHT) {
+            int r = tr + v[0], f = tf + v[1];
+            if (r >= 0 && r < 8 && f >= 0 && f < 8 && b[r * 8 + f] == knight) return r * 8 + f;
+        }
+        char bishop = white ? 'B' : 'b', rook = white ? 'R' : 'r', queen = white ? 'Q' : 'q', king = white ? 'K' : 'k';
+        int bestQueen = -1;
+        int bishopSq = -1, rookSq = -1;
+        for (int[] v : SEE_DIAG) {
+            int r = tr + v[0], f = tf + v[1];
+            while (r >= 0 && r < 8 && f >= 0 && f < 8) {
+                char c = b[r * 8 + f];
+                if (c != '.') {
+                    if (c == bishop && bishopSq < 0) bishopSq = r * 8 + f;
+                    else if (c == queen && bestQueen < 0) bestQueen = r * 8 + f;
+                    break;
+                }
+                r += v[0]; f += v[1];
+            }
+        }
+        if (bishopSq >= 0) return bishopSq;
+        for (int[] v : SEE_ORTH) {
+            int r = tr + v[0], f = tf + v[1];
+            while (r >= 0 && r < 8 && f >= 0 && f < 8) {
+                char c = b[r * 8 + f];
+                if (c != '.') {
+                    if (c == rook && rookSq < 0) rookSq = r * 8 + f;
+                    else if (c == queen && bestQueen < 0) bestQueen = r * 8 + f;
+                    break;
+                }
+                r += v[0]; f += v[1];
+            }
+        }
+        if (rookSq >= 0) return rookSq;
+        if (bestQueen >= 0) return bestQueen;
+        for (int dr = -1; dr <= 1; dr++) {
+            for (int df = -1; df <= 1; df++) {
+                if (dr == 0 && df == 0) continue;
+                int r = tr + dr, f = tf + df;
+                if (r >= 0 && r < 8 && f >= 0 && f < 8 && b[r * 8 + f] == king) return r * 8 + f;
+            }
+        }
+        return -1;
+    }
+
+    /* Swap-list SEE for a capture; positive = the capturing side wins material. Promotions count as pawn moves. */
+    private static int see(Board board, Move move) {
+        char[] b = new char[64];
+        for (int i = 0; i < 64; i++) b[i] = board.getPiece(i);
+        int to = move.to;
+        char mover = b[move.from];
+        boolean white = Character.isUpperCase(mover);
+        int[] gain = new int[34];
+        int d = 0;
+        int victim = seeValue(b[to]);
+        if (move.enPassant) {
+            victim = 100;
+            b[white ? to - 8 : to + 8] = '.';
+        }
+        gain[0] = victim;
+        int onSquare = seeValue(mover);
+        b[move.from] = '.';
+        b[to] = mover;
+        boolean side = !white;
+        while (d < 32) {
+            int a = leastAttacker(b, to, side);
+            if (a < 0) break;
+            d++;
+            gain[d] = onSquare - gain[d - 1];
+            onSquare = seeValue(b[a]);
+            b[to] = b[a];
+            b[a] = '.';
+            side = !side;
+            if (Math.max(-gain[d - 1], gain[d]) < 0) break;
+        }
+        while (d > 0) {
+            gain[d - 1] = -Math.max(-gain[d - 1], gain[d]);
+            d--;
+        }
+        return gain[0];
+    }
+
     private static int pieceCount(Board board) {
         int n = 0;
         for (int s = 0; s < 64; s++) {
@@ -530,7 +733,7 @@ public class ChessEngine {
         return n;
     }
 
-    /** A pawn that steps onto its 7th rank (Patterns 8, 14, 26, 66): the race tactics need the extra ply. */
+    /* A pawn that steps onto its 7th rank (Patterns 8, 14, 26, 66): the race tactics need the extra ply. */
     private static boolean pawnToSeventh(Board board, Move move) {
         char pc = board.getPiece(move.from);
         if (pc == 'P') {
@@ -577,7 +780,10 @@ public class ChessEngine {
             int victimValue = getPieceValue(board.getPieceTypeAt(move.to));
             if (victimValue == 0 && move.enPassant) victimValue = 100;
             int attackerValue = getPieceValue(board.getPieceTypeAt(move.from));
-            return 10_000 + (victimValue * 10 - attackerValue);
+            if (victimValue >= attackerValue || (standardLike(board) && see(board, move) >= 0)) {
+                return 20_000 + (victimValue * 10 - attackerValue);
+            }
+            return 7_500 + victimValue / 10;
         }
 
         if (isPromotion(move)) {
@@ -660,7 +866,32 @@ public class ChessEngine {
 
     private final PositionEval positionEval = new PositionEval();
 
+    // Evaluation cache: the same position is evaluated again and again (transpositions, quiescence
+    // leaves, every new iteration of iterative deepening). A hit costs much less time.
+    private static final int EVAL_MASK = (1 << 20) - 1;
+    private final long[] evalKeys = new long[EVAL_MASK + 1];
+    private final int[] evalVals = new int[EVAL_MASK + 1];
+
+    private void evalCacheClear() {
+        Arrays.fill(evalKeys, 0L);
+    }
+
     private int evaluate(Board board) {
+        long key = board.getZobristKey();
+        if (board.isThreeCheck()) {
+            key ^= board.getWhiteChecks() * 0x9E3779B97F4A7C15L ^ board.getBlackChecks() * 0xC2B2AE3D27D4EB4FL;
+        }
+        int idx = (int) (key ^ (key >>> 32)) & EVAL_MASK;
+        if (evalKeys[idx] == key) {
+            return evalVals[idx];
+        }
+        int v = evaluateUncached(board);
+        evalKeys[idx] = key;
+        evalVals[idx] = v;
+        return v;
+    }
+
+    private int evaluateUncached(Board board) {
         if (board.isAntiChess()) {
             return AntiChess.evaluate(board);
         }
@@ -725,6 +956,7 @@ public class ChessEngine {
         clearKillerMoves();
         clearHistory();
         ttClear();
+        evalCacheClear();
         gameHistory.clear();
         contempt = 0;
         positionEval.setEngineSide(-1);
@@ -1230,9 +1462,20 @@ public class ChessEngine {
                 if (passed) {
                     passedFile[c][f] = true;
                     int b = PASSED[rr];
-                    pv += b + b * (24 - phase) / 24;
+                    int passBonus = b + b * (24 - phase) / 24;
 
                     int stopSq = s + (c == 0 ? 8 : -8);
+                    boolean blockadedByPiece = false;
+                    if (stopSq >= 0 && stopSq < 64 && sq[stopSq] != 0 && (sq[stopSq] > 0) != (c == 0)
+                            && Math.abs(sq[stopSq]) != K) {
+                        blockadedByPiece = true;
+                        // a piece sitting on the stop square of a pawn on the 6th/7th is a blockade, not a threat:
+                        // the pawn ties our own pieces down and is the first thing to fall once the queens are
+                        // off (the "passed pawn on e2" illusion: it was scored as +2.2 pawns and was just lost)
+                        if (rr == 6) passBonus = passBonus * 2 / 5;
+                        else if (rr == 5) passBonus = passBonus * 3 / 4;
+                    }
+                    pv += passBonus;
                     if (stopSq >= 0 && stopSq < 64) {
                         if (sq[stopSq] != 0 && (sq[stopSq] > 0) != (c == 0)) pv -= b / 3;
 
@@ -1967,7 +2210,7 @@ public class ChessEngine {
             return strong;
         }
 
-        // ---- Queen against a minor piece -----------------------------------------------------------
+        // Queen against a minor piece
         private int queenAgainstMinorPiece(int st, int wk, int stP, int wkP, int strong) {
             if (wkP == 0 || stP > 0) {
                 return strong;
@@ -2143,7 +2386,7 @@ public class ChessEngine {
             int total = pw0 + pw1;
             int val = 0; // positive = good for the bishop
 
-            // --- how open is the position? pawns standing head to head (central ones count more)
+            //how open is the position? pawns standing head to head (central ones count more)
             int blocked = 0, blockedCentral = 0, targets = 0, fixedOnBishopColour = 0;
             boolean low = false, high = false;
             for (int s = 0; s < 64; s++) {
@@ -2425,11 +2668,11 @@ public class ChessEngine {
             return score;
         }
 
-        /**
-         * A far-advanced passed pawn that nothing of the opponent can stop any more (the king is outside the
-         * square, no rook or queen watches the file or the squares in front of the pawn, no knight or bishop is
-         * near enough). In rook and minor-piece endings these pawn races decide the game, and a search that
-         * stops a few plies too early otherwise believes the pawn can still be caught.
+        /*
+          A far-advanced passed pawn that nothing of the opponent can stop any more (the king is outside the
+          square, no rook or queen watches the file or the squares in front of the pawn, no knight or bishop is
+          near enough). In rook and minor-piece endings these pawn races decide the game, and a search that
+          stops a few plies too early otherwise believes the pawn can still be caught.
          */
         private int runawayPassedPawn(int c, int s, int f, int rr) {
             int en = 1 - c;
