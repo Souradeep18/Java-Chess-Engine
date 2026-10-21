@@ -2028,25 +2028,26 @@ public class ChessEngine {
             }
 
             score = flearEndgamePatterns(score, phase, pawns0, pawns1);
+            score = minorAgainstPawns(score);
 
             score += side == 0 ? 10 : -10;
             return score;
         }
 
-        // ------------------------------------------------------------------------------------------
-        // Queen endings (volume 3 of the pattern book: queen v pawns, queen v rook, queen v minor piece,
-        // queen and pawn(s) v queen). Everything here corrects the material count where theory knows that
-        // it lies: fortresses, rook- and bishop-pawn draws, the pawn on the 7th, two connected pawns, the
-        // checks that save the weaker side, and the outside passed pawn that wins.
-        // The score is from White's point of view, like everything else in PositionEval.
-        // ------------------------------------------------------------------------------------------
 
-        /** Square on which the pawn of side c standing on file f promotes. */
+        /* Queen endings ( queen v pawns, queen v rook, queen v minor piece,
+         queen and pawn(s) v queen). Everything here corrects the material count where theory knows that
+         it lies: fortresses, rook- and bishop-pawn draws, the pawn on the 7th, two connected pawns, the
+         checks that save the weaker side, and the outside passed pawn that wins.
+         The score is from White's point of view, like everything else in PositionEval.*/
+
+
+        /* Square on which the pawn of side c standing on file f promotes. */
         private static int promotionSquare(int c, int f) {
             return (c == 0 ? 56 : 0) + f;
         }
 
-        /** File of the only pawn of side c, or -1 when it has none or several. */
+        /* File of the only pawn of side c, or -1 when it has none or several. */
         private int lonePawnFile(int c) {
             int file = -1;
             for (int f = 0; f < 8; f++) {
@@ -2057,7 +2058,7 @@ public class ChessEngine {
             return file;
         }
 
-        /** Bishop's or rook's pawn: the files where the queen has the greatest trouble (a, c, f, h). */
+        /* Bishop's or rook's pawn: the files where the queen has the greatest trouble (a, c, f, h). */
         private static boolean bishopOrRookFile(int f) {
             return f == 0 || f == 2 || f == 5 || f == 7;
         }
@@ -2507,6 +2508,59 @@ public class ChessEngine {
 
             val = Math.max(-60, Math.min(60, val));
             return score + (bs == 0 ? val : -val);
+        }
+
+
+        /*
+          A single minor piece against pawns only (no other pieces on either side), where the pawn side has MORE
+          pawns than the piece side: "N + pawn v two pawns", "B v three pawns" ... The material count calls it
+          +1.2 for the piece, but with connected pawns, a king that is nearer to them than the enemy king, and
+          far-advanced pawns, it is a draw or even better for the pawns (Averbakh vol. 2/3, minor piece against
+          pawns). Without this the engine "wins" a piece for two pawns and walks into a drawn ending (49...f5??
+          in the Nc3 game, and "better for Black" for 20 moves in a dead draw).
+         */
+        private int minorAgainstPawns(int score) {
+            for (int ps = 0; ps < 2; ps++) {
+                int pw = 1 - ps;
+                if ((npMat[ps] != 320 && npMat[ps] != 330) || npMat[pw] != 0) continue;
+                if (queenSq[0] >= 0 || queenSq[1] >= 0 || rookN[0] + rookN[1] > 0) continue;
+                int pa = pawnTotal(ps), pb = pawnTotal(pw);
+                if (pb <= pa || pb == 0) continue;
+                // the piece side's lead must be what is being scaled
+                boolean pieceSideAhead = (score > 0) == (ps == 0);
+                if (!pieceSideAhead) continue;
+
+                boolean connected = false;
+                int bestRank = 0;
+                int pawnSqBest = -1;
+                for (int f = 0; f < 8; f++) {
+                    if (pawnCnt[pw][f] == 0) continue;
+                    if (f < 7 && pawnCnt[pw][f + 1] > 0) connected = true;
+                    int rk = pawnRank(pw, f);
+                    if (rk > bestRank) {
+                        bestRank = rk;
+                        pawnSqBest = (pw == 0 ? pawnMax[0][f] : pawnMin[1][f]) * 8 + f;
+                    }
+                }
+                if (pawnSqBest < 0) continue;
+                int dPawnKing = chebyshev(kingSq[pw], pawnSqBest);
+                int dPieceKing = chebyshev(kingSq[ps], pawnSqBest);
+                boolean kingCloser = dPawnKing + 1 <= dPieceKing;
+
+                int num = 16;
+                if (pb - pa == 1) {
+                    if (connected && kingCloser) num = 4;
+                    else if (connected) num = 9;
+                    else if (kingCloser) num = 10;
+                } else {
+                    if (connected && kingCloser) num = 6;
+                    else if (connected) num = 11;
+                    else if (kingCloser) num = 12;
+                }
+                if (num < 16 && bestRank >= 4) num = Math.max(2, num - 2);   // advanced pawns: the knight must stop them
+                score = score * num / 16;
+            }
+            return score;
         }
 
         // Relative rank (0 = own back rank) of the most advanced pawn of colour c on file f.
