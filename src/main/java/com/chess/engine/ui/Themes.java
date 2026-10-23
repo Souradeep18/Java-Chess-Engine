@@ -12,9 +12,8 @@ import java.util.Map;
 import java.util.prefs.Preferences;
 
 /*
-  Board colour themes, piece sets and presets, plus the saved choice.
- 
-  The first entry of {@link #BOARDS} and of {@link #PIECES} is the default look of the application
+ Board colour themes, piece sets and presets, plus the saved choice.
+ The first entry of {@link #BOARDS} and of {@link #PIECES} is the default look of the application
   (the brown board with the classic glyph pieces). The choice is stored with
   {@link java.util.prefs.Preferences}, so it survives closing the application and only changes when the
   user saves a different theme.
@@ -28,7 +27,9 @@ public final class Themes {
     private Themes() {
     }
 
+
     //  Board themes
+
 
     public static final class BoardTheme {
         public final String id;
@@ -77,11 +78,11 @@ public final class Themes {
             new BoardTheme("mint", "Mint", c(236, 250, 240), c(120, 190, 150))
     ));
 
-    // =====================================================================================
-    //  Piece sets
-    // =====================================================================================
 
-    /** Something that can draw a chess piece into a square. */
+    //  Piece sets
+
+
+    /* Something that can draw a chess piece into a square. */
     public abstract static class PieceSet {
         public final String id;
         public final String name;
@@ -91,9 +92,9 @@ public final class Themes {
             this.name = name;
         }
 
-        /**
-         * The classic set is the one the squares draw themselves (as text); every other set is painted
-         * by {@link #paint}.
+        /*
+          The classic set is the one the squares draw themselves (as text); every other set is painted
+          by {@link #paint}.
          */
         public boolean isClassic() {
             return false;
@@ -146,7 +147,7 @@ public final class Themes {
         }
     }
 
-    /** The look the application has always had: white pieces hollow, black pieces solid (font glyphs as text). */
+    /* The look the application has always had: white pieces hollow, black pieces solid (font glyphs as text). */
     public static final class ClassicSet extends PieceSet {
         public ClassicSet() {
             super("classic", "Classic");
@@ -172,7 +173,7 @@ public final class Themes {
         }
     }
 
-    /** Pieces drawn as filled outlines of the solid glyphs, with their own fill, outline and shadow colours. */
+    /* Pieces drawn as filled outlines of the solid glyphs, with their own fill, outline and shadow colours. */
     public static final class GlyphSet extends PieceSet {
         private final Color whiteFill;
         private final Color whiteLine;
@@ -223,9 +224,89 @@ public final class Themes {
         }
     }
 
-    /** The first one is the default. */
+    /*
+      Pieces with their own shapes (see PieceShapes): a shape family drawn with fill, outline and shadow colours.
+     */
+    public static final class ShapeSet extends PieceSet {
+        private final PieceShapes.Family family;
+        private final Color whiteFill;
+        private final Color whiteLine;
+        private final Color blackFill;
+        private final Color blackLine;
+        private final float lineWidth;
+        private final boolean shadow;
+
+        public ShapeSet(String id, String name, PieceShapes.Family family, Color whiteFill, Color whiteLine,
+                        Color blackFill, Color blackLine, float lineWidth, boolean shadow) {
+            super(id, name);
+            this.family = family;
+            this.whiteFill = whiteFill;
+            this.whiteLine = whiteLine;
+            this.blackFill = blackFill;
+            this.blackLine = blackLine;
+            this.lineWidth = lineWidth;
+            this.shadow = shadow;
+        }
+
+        @Override
+        public void paint(Graphics2D g, char piece, int x, int y, int size) {
+            Shape unit = PieceShapes.shape(family, piece);
+            boolean white = Character.isUpperCase(piece);
+
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+
+            double scale = size * 0.90 / 100.0;
+            AffineTransform at = new AffineTransform();
+            at.translate(x + size * 0.05, y + size * 0.05);
+            at.scale(scale, scale);
+            Shape shape = at.createTransformedShape(unit);
+
+            if (shadow) {
+                Graphics2D sh = (Graphics2D) g2.create();
+                sh.translate(Math.max(1, size / 36.0), Math.max(1, size / 36.0));
+                sh.setColor(new Color(0, 0, 0, 70));
+                sh.fill(shape);
+                sh.dispose();
+            }
+
+            g2.setColor(white ? whiteFill : blackFill);
+            g2.fill(shape);
+            g2.setColor(white ? whiteLine : blackLine);
+            g2.setStroke(new BasicStroke(Math.max(0.8f, lineWidth * size / 50f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.draw(shape);
+            g2.dispose();
+        }
+    }
+
+    /* The first one is the default. */
     public static final List<PieceSet> PIECES = Collections.unmodifiableList(java.util.Arrays.asList(
             new ClassicSet(),
+            // own shapes: Staunton
+            new ShapeSet("staunton", "Staunton", PieceShapes.Family.STAUNTON, c(250, 247, 238), c(60, 48, 38), c(78, 70, 64), c(20, 16, 12), 1.5f, true),
+            new ShapeSet("staunton-wood", "Staunton Wood", PieceShapes.Family.STAUNTON, c(238, 208, 160), c(92, 56, 28), c(104, 62, 34), c(38, 20, 8), 1.5f, true),
+            new ShapeSet("staunton-gold", "Staunton Gold", PieceShapes.Family.STAUNTON, c(238, 196, 70), c(112, 80, 12), c(36, 36, 40), c(0, 0, 0), 1.5f, true),
+            // own shapes: Geometric
+            new ShapeSet("geometric", "Geometric", PieceShapes.Family.GEOMETRIC, c(240, 242, 245), c(50, 56, 66), c(52, 58, 70), c(14, 18, 26), 1.5f, false),
+            new ShapeSet("geometric-blue", "Geometric Blue", PieceShapes.Family.GEOMETRIC, c(232, 242, 252), c(26, 60, 110), c(36, 96, 176), c(8, 28, 70), 1.5f, false),
+            new ShapeSet("geometric-red", "Geometric Red", PieceShapes.Family.GEOMETRIC, c(252, 236, 226), c(110, 40, 30), c(190, 52, 44), c(80, 12, 10), 1.5f, false),
+            //  own shapes: Chunky
+            new ShapeSet("chunky", "Chunky", PieceShapes.Family.CHUNKY, c(252, 252, 250), c(70, 70, 70), c(62, 62, 66), c(10, 10, 12), 1.4f, true),
+            new ShapeSet("chunky-candy", "Chunky Candy", PieceShapes.Family.CHUNKY, c(255, 226, 236), c(150, 60, 100), c(120, 90, 200), c(50, 24, 110), 1.4f, true),
+            new ShapeSet("chunky-mint", "Chunky Mint", PieceShapes.Family.CHUNKY, c(226, 250, 238), c(40, 110, 76), c(30, 130, 96), c(8, 56, 40), 1.4f, true),
+            // own shapes: ten more families, each with its own colourway
+            new ShapeSet("slim", "Slim", PieceShapes.Family.SLIM, c(246, 244, 240), c(70, 70, 82), c(54, 58, 68), c(14, 16, 22), 1.3f, true),
+            new ShapeSet("stout", "Stout", PieceShapes.Family.STOUT, c(244, 226, 196), c(124, 72, 40), c(150, 84, 52), c(70, 30, 14), 1.6f, true),
+            new ShapeSet("minimal", "Minimal", PieceShapes.Family.MINIMAL, c(255, 255, 255), c(30, 30, 30), c(38, 38, 38), c(0, 0, 0), 2.0f, false),
+            new ShapeSet("pixel", "Pixel", PieceShapes.Family.PIXEL, c(110, 220, 255), c(14, 30, 80), c(255, 100, 160), c(80, 8, 50), 1.2f, false),
+            new ShapeSet("art-deco", "Art Deco", PieceShapes.Family.ART_DECO, c(236, 210, 132), c(122, 90, 30), c(30, 32, 42), c(214, 174, 74), 1.5f, true),
+            new ShapeSet("bubble", "Bubble", PieceShapes.Family.BUBBLE, c(255, 218, 232), c(196, 96, 150), c(160, 206, 255), c(56, 98, 182), 1.6f, true),
+            new ShapeSet("letters", "Letters", PieceShapes.Family.LETTERS, c(244, 240, 228), c(62, 52, 42), c(64, 56, 52), c(18, 14, 10), 1.4f, false),
+            new ShapeSet("gothic", "Gothic", PieceShapes.Family.GOTHIC, c(216, 220, 232), c(50, 58, 84), c(66, 34, 62), c(22, 6, 22), 1.5f, true),
+            new ShapeSet("coin", "Coin", PieceShapes.Family.COIN, c(236, 188, 66), c(120, 84, 16), c(150, 94, 54), c(58, 28, 8), 1.4f, true),
+            new ShapeSet("blocks", "Blocks", PieceShapes.Family.BLOCKS, c(255, 214, 64), c(132, 98, 0), c(52, 112, 204), c(12, 40, 104), 1.5f, false),
+            // the font-glyph sets (same shapes, different colours)
             new GlyphSet("ivory", "Ivory & Ebony", c(252, 252, 252), c(47, 47, 47), c(70, 70, 66), c(0, 0, 0), 1.6f, true),
             new GlyphSet("cream", "Cream & Brown", c(248, 234, 205), c(90, 62, 40), c(96, 62, 38), c(40, 24, 12), 1.6f, true),
             new GlyphSet("gold", "Gold & Black", c(236, 190, 52), c(110, 78, 10), c(34, 34, 34), c(0, 0, 0), 1.6f, true),
@@ -240,11 +321,11 @@ public final class Themes {
             new GlyphSet("neon", "Neon", c(120, 255, 240), c(0, 90, 90), c(255, 90, 200), c(100, 0, 70), 1.8f, true)
     ));
 
-    // ----- glyph drawing helpers (shared by the sets) -----
+    //  glyph drawing helpers (shared by the sets) 
 
     private static final Map<String, Shape> OUTLINE_CACHE = new HashMap<>();
 
-    /** The outline of a glyph centred in the square (x, y, size). Outlines are cached per glyph and size. */
+    /* The outline of a glyph centred in the square (x, y, size). Outlines are cached per glyph and size. */
     static synchronized Shape glyphOutline(String symbol, int x, int y, int size) {
         String key = symbol + "@" + size;
         Shape base = OUTLINE_CACHE.get(key);
@@ -260,7 +341,7 @@ public final class Themes {
         return AffineTransform.getTranslateInstance(x, y).createTransformedShape(base);
     }
 
-    /** Draws a glyph as text (used by the classic set so it looks like the text the squares draw). */
+    /* Draws a glyph as text (used by the classic set so it looks like the text the squares draw). */
     private static void drawGlyph(Graphics2D g2, String symbol, int x, int y, int size, boolean unused) {
         Font font = new Font(SYMBOL_FONT, Font.PLAIN, Math.max(8, Math.round(size * 0.78f)));
         g2.setFont(font);
@@ -270,9 +351,8 @@ public final class Themes {
         g2.drawString(symbol, tx, ty);
     }
 
-    // =====================================================================================
+    
     //  Presets (a board and a piece set that go well together)
-    // =====================================================================================
 
     public static final class Preset {
         public final String name;
@@ -301,9 +381,8 @@ public final class Themes {
             new Preset("Neon Night", "charcoal", "neon")
     ));
 
-    // =====================================================================================
+
     //  The saved choice
-    // =====================================================================================
 
     private static final String KEY_BOARD = "theme.board";
     private static final String KEY_PIECES = "theme.pieces";
@@ -361,7 +440,7 @@ public final class Themes {
         return currentPieces;
     }
 
-    /** Makes the choice current, stores it for the next run and tells the listeners. */
+    /* Makes the choice current, stores it for the next run and tells the listeners. */
     public static void save(BoardTheme board, PieceSet pieces) {
         ensureLoaded();
         currentBoard = board != null ? board : BOARDS.get(0);
