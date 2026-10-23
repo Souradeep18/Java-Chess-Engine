@@ -64,6 +64,7 @@ public class ChessFrame extends JFrame {
     private final JButton flipButton;
     private final JButton coordinatesButton;
     private final JButton tourButton;
+    private final JButton settingsButton;
 
     // Board editor: variant chooser (replaces the GAME section while editing)
     private final JComboBox<String> variantCombo;
@@ -545,6 +546,33 @@ public class ChessFrame extends JFrame {
         topCheckPanel = createCheckPanel(topCheckMarks);
         bottomCheckPanel = createCheckPanel(bottomCheckMarks);
 
+        /* Settings button (bottom of the east column): a drop-down with "Themes"
+         the gear is drawn (GearIcon) instead of typed: a text symbol needs a font that has it and is wide
+         enough for the button, otherwise Swing shows "..."*/
+        settingsButton = new JButton(new GearIcon(25, new Color(45, 45, 45)));
+        settingsButton.setMargin(new Insets(2, 2, 2, 2));
+        settingsButton.setFocusable(false);
+        settingsButton.setPreferredSize(new Dimension(50, 40));
+        settingsButton.setMaximumSize(new Dimension(50, 40));
+        settingsButton.setToolTipText("Settings");
+
+        JPopupMenu settingsMenu = new JPopupMenu();
+        JMenuItem themesItem = new JMenuItem("Themes");
+        themesItem.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        themesItem.addActionListener(e ->
+                ThemesDialog.open(SwingUtilities.getWindowAncestor(this), boardPanel::applyTheme));
+        settingsMenu.add(themesItem);
+        settingsButton.addActionListener(e -> settingsMenu.show(settingsButton, 0, settingsButton.getHeight()));
+
+        JPanel eastBottom = new JPanel();
+        eastBottom.setOpaque(false);
+        eastBottom.setLayout(new BoxLayout(eastBottom, BoxLayout.Y_AXIS));
+        bottomCheckPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        settingsButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eastBottom.add(bottomCheckPanel);
+        eastBottom.add(Box.createVerticalStrut(10));
+        eastBottom.add(settingsButton);
+
         JPanel eastTop = new JPanel();
         eastTop.setOpaque(false);
         eastTop.setLayout(new BoxLayout(eastTop, BoxLayout.Y_AXIS));
@@ -554,7 +582,7 @@ public class ChessFrame extends JFrame {
         eastTop.add(topCheckPanel);
 
         tourButtonPanel.add(eastTop, BorderLayout.NORTH);
-        tourButtonPanel.add(bottomCheckPanel, BorderLayout.SOUTH);
+        tourButtonPanel.add(eastBottom, BorderLayout.SOUTH);
         boardContainer.add(tourButtonPanel, BorderLayout.EAST);
 
         add(boardContainer, BorderLayout.CENTER);
@@ -608,6 +636,7 @@ public class ChessFrame extends JFrame {
     }
 
     // --- Piece Palette Generator ---
+ // --- Piece Palette Generator ---
     private JPanel createPiecePalette(boolean isWhite) {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 4));
         panel.setBackground(new Color(235, 238, 240));
@@ -640,15 +669,43 @@ public class ChessFrame extends JFrame {
             panel.add(btn);
         }
 
-        // Add Delete Piece button ("❌")
-        JButton deleteBtn = new JButton("❌");
+        // Delete Piece button: always red, blue border while delete mode is on
+        JButton deleteBtn = new JButton("❌") {
+            @Override
+            protected void paintComponent(Graphics g) {
+                int w = getWidth(), h = getHeight();
+
+                if (getModel().isPressed()) {
+                    g.setColor(Color.RED.darker());      // darker red on click
+                } else if (getModel().isRollover()) {
+                    g.setColor(Color.RED.brighter());    // brighter red on hover
+                } else {
+                    g.setColor(Color.RED);               // default
+                }
+                g.fillRect(0, 0, w, h);
+                super.paintComponent(g);                 // the emoji on top
+
+                if (Boolean.TRUE.equals(getClientProperty("paletteSelected"))) {
+                    g.setColor(new Color(30, 110, 200)); // 3 px blue frame
+                    g.fillRect(0, 0, w, 3);
+                    g.fillRect(0, h - 3, w, 3);
+                    g.fillRect(0, 0, 3, h);
+                    g.fillRect(w - 3, 0, 3, h);
+//                    g.setColor(Color.WHITE); // thin white line inside it
+//                    g.drawRect(3, 3, w - 7, h - 7);
+                } else {
+                    g.setColor(new Color(120, 120, 120)); // same thin edge as the other buttons
+                    g.drawRect(0, 0, w - 1, h - 1);
+                }
+            }
+        };
         deleteBtn.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 16));
         deleteBtn.setPreferredSize(new Dimension(48, 42));
         deleteBtn.setMargin(new Insets(0, 0, 0, 0));
         deleteBtn.setFocusable(false);
-        deleteBtn.setBackground(Color.RED);
+        deleteBtn.setContentAreaFilled(false);   // the native look must not paint over the red
+        deleteBtn.setBorderPainted(false);
         deleteBtn.setToolTipText("Delete piece mode (click again to turn off)");
-
         deleteBtn.addActionListener(e -> selectPalettePiece('X'));
 
         paletteButtons.put(deleteBtn, 'X');
@@ -749,8 +806,15 @@ public class ChessFrame extends JFrame {
                     && entry.getValue() == selectedEditorPiece;
 
             JButton btn = entry.getKey();
+
+            if (entry.getValue() == 'X') { // the red delete button paints its own border
+                btn.putClientProperty("paletteSelected", selected);
+                btn.repaint();
+                continue;
+            }
+
             btn.setBackground(selected ? new Color(175, 215, 245) : Color.WHITE);
-            btn.setBorder(selected ? BorderFactory.createLineBorder(new Color(30, 110, 200), 3)
+            btn.setBorder(selected ? BorderFactory.createLineBorder(new Color(30, 110, 150), 3)
                     : UIManager.getBorder("Button.border"));
         }
     }

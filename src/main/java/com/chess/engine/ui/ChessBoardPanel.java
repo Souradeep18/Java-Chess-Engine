@@ -18,11 +18,10 @@ import java.util.Map;
 @SuppressWarnings("serial")
 public class ChessBoardPanel extends JPanel {
 
-    private static final Color LIGHT_SQUARE =
-            new Color(240, 217, 181);
+    // Board colours come from the chosen theme (Themes.java); the default is the brown board.
+    private static Color LIGHT_SQUARE = Themes.getBoard().light;
 
-    private static final Color DARK_SQUARE =
-            new Color(181, 136, 99);
+    private static Color DARK_SQUARE = Themes.getBoard().dark;
 
     private static final Color SELECTED_COLOR =
             new Color(130, 151, 105);
@@ -128,8 +127,20 @@ public class ChessBoardPanel extends JPanel {
         refreshBoard();
     }
 
-    /**
-     * Toggles or sets board flip orientation.
+    /*
+      Re-reads the chosen theme (board colours and piece set) and repaints the whole board.
+      Called after the user saved a new theme in the Themes window.
+     */
+    public void applyTheme() {
+        LIGHT_SQUARE = Themes.getBoard().light;
+        DARK_SQUARE = Themes.getBoard().dark;
+        updateCoordinateLabels();
+        refreshBoard();
+        repaint();
+    }
+
+    /*
+      Toggles or sets board flip orientation.
      */
     public void setFlipped(boolean flipped) {
         if (this.isFlipped != flipped) {
@@ -566,8 +577,13 @@ public class ChessBoardPanel extends JPanel {
                     button.setBackground(LIGHT_SQUARE);
                 }
 
+                Themes.PieceSet pieceSet = Themes.getPieces();
+                button.pieceSet = pieceSet;
+                button.piece = board.getPiece(square);
+                button.mateMark = false;
+
                 button.setText(
-                        pieceSymbol(board.getPiece(square))
+                        pieceSet.isClassic() ? pieceSymbol(board.getPiece(square)) : ""
                 );
 
                 if (square == selectedSquare) {
@@ -616,6 +632,9 @@ public class ChessBoardPanel extends JPanel {
                 if ((square == whiteKingSquare && whiteCheckmate)
                         || (square == blackKingSquare && blackCheckmate)) {
 
+                    if (!pieceSet.isClassic()) {
+                        button.mateMark = true;          // drawn by the square next to the themed piece
+                    } else
                     button.setText(
                             "<html>"
                                     + "<div style='position:relative;'>"
@@ -869,6 +888,10 @@ public class ChessBoardPanel extends JPanel {
         boolean hillActive;   // King of the Hill: draw the lifted centre
         int visualCol, visualRow;
 
+        Themes.PieceSet pieceSet;   // null / classic: the piece is the button text
+        char piece = '.';
+        boolean mateMark;           // "#" next to a mated king when a themed piece set is used
+
         public void setLegalMoveDot(boolean legalMoveDot) {
             this.legalMoveDot = legalMoveDot;
         }
@@ -880,6 +903,22 @@ public class ChessBoardPanel extends JPanel {
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
+
+            // themed pieces (the classic set is the button text drawn by super.paintComponent)
+            if (pieceSet != null && !pieceSet.isClassic() && piece != '.') {
+                Graphics2D pg = (Graphics2D) g.create();
+                int size = Math.min(getWidth(), getHeight());
+                pieceSet.paint(pg, piece, (getWidth() - size) / 2, (getHeight() - size) / 2, size);
+                if (mateMark) {
+                    pg.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                    pg.setFont(new Font("SansSerif", Font.BOLD, Math.max(14, size / 4)));
+                    pg.setColor(Color.WHITE);
+                    String mark = "#";
+                    FontMetrics fm = pg.getFontMetrics();
+                    pg.drawString(mark, getWidth() - fm.stringWidth(mark) - 6, fm.getAscent() + 4);
+                }
+                pg.dispose();
+            }
 
             // overlay (knight's tour path) drawn in panel coordinates, clipped to this square
             if (owner != null) {
