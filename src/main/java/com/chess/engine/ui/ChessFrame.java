@@ -1,5 +1,6 @@
 package com.chess.engine.ui;
 
+import com.chess.engine.analysis.PgnGame;
 import com.chess.engine.engine.Board;
 import com.chess.engine.engine.AtomicChess;
 import com.chess.engine.engine.ChessEngine;
@@ -46,6 +47,8 @@ public class ChessFrame extends JFrame {
 
     private final JButton newGameButton;
     private final JButton loadFenButton;
+    private final JButton loadPgnButton;
+    private GameAnalysisDialog gameAnalysisDialog;   // the open game review, if any
     private final JButton engineButton;
 
     // Evaluation: toggle next to "Engine Move", bar beside the board, and the best lines
@@ -221,20 +224,31 @@ public class ChessFrame extends JFrame {
 
         newGameButton = new JButton("New Game");
         loadFenButton = new JButton("Load FEN");
+        loadPgnButton = new JButton("Load PGN");
         engineButton = new JButton("Engine Move");
 
         Dimension controlSize = new Dimension(320, 38);
         newGameButton.setMaximumSize(controlSize);
         loadFenButton.setMaximumSize(controlSize);
+        loadPgnButton.setMaximumSize(controlSize);
         engineButton.setMaximumSize(controlSize);
 
         newGameButton.setAlignmentX(Component.LEFT_ALIGNMENT);
         loadFenButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+        loadPgnButton.setAlignmentX(Component.LEFT_ALIGNMENT);
         engineButton.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         gameSection.add(newGameButton);
         gameSection.add(Box.createVerticalStrut(6));
-        gameSection.add(loadFenButton);
+        // "Load FEN" and "Load PGN" share one row
+        JPanel loadRow = new JPanel(new GridLayout(1, 2, 6, 0));
+        loadRow.setOpaque(false);
+        loadRow.setMaximumSize(controlSize);
+        loadRow.setPreferredSize(controlSize);
+        loadRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        loadRow.add(loadFenButton);
+        loadRow.add(loadPgnButton);
+        gameSection.add(loadRow);
         gameSection.add(Box.createVerticalStrut(6));
 
         // "Engine Move" is a little narrower to make room for the evaluation toggle
@@ -301,6 +315,7 @@ public class ChessFrame extends JFrame {
 
         newGameButton.addActionListener(e -> startNewGame());
         loadFenButton.addActionListener(e -> loadFEN());
+        loadPgnButton.addActionListener(e -> openPgnDialog());
         engineButton.addActionListener(e -> makeEngineMove());
         analysisToggle.addActionListener(e -> refreshAnalysis());
 
@@ -1251,6 +1266,7 @@ public class ChessFrame extends JFrame {
     private void setMainUIEnabled(boolean enabled) {
         newGameButton.setEnabled(enabled);
         loadFenButton.setEnabled(enabled);
+        loadPgnButton.setEnabled(enabled);
         engineButton.setEnabled(enabled);
         backButton.setEnabled(enabled && currentNode.parent != null);
         forwardButton.setEnabled(enabled && !currentNode.children.isEmpty());
@@ -1752,6 +1768,71 @@ public class ChessFrame extends JFrame {
                 JOptionPane.showMessageDialog(this, "Invalid FEN string format.", "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    // --- PGN: put a whole game into the MOVES list, or review it with the engine ---
+
+    private void openPgnDialog() {
+        if (isEditorMode || knightsTour.isActive()) {
+            JOptionPane.showMessageDialog(this, "Leave the board editor and the Knight's Tour first.",
+                    "Load PGN", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        PgnDialog dialog = new PgnDialog(this, this::loadPgnGame, this::analysePgnGame);
+        dialog.setVisible(true);
+    }
+
+    /**
+     * Replaces the move list by the game: the starting position of the game stays on the board and the
+     * moves can be walked through with "<" and ">".
+     */
+    private void loadPgnGame(PgnGame game) {
+        stopAnalysis();
+
+        MoveNode root = new MoveNode(game.getStartBoard(), null, game.getTags().containsKey("FEN") ? "FEN" : "Start", 0);
+        MoveNode node = root;
+
+        try {
+            for (Move move : game.getMoves()) {
+                Board after = node.board.copy();
+                MoveGenerator.makeMove(after, move);
+                node = findOrCreateChild(node, node.board, after, move);
+            }
+        } catch (RuntimeException ex) {
+            JOptionPane.showMessageDialog(this, "The game could not be loaded: " + ex.getMessage(),
+                    "Load PGN", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        rootNode = root;
+        selectNode(rootNode);
+    }
+
+    /** Loads the game and opens the review window (graph, accuracy, kinds of moves). */
+    private void analysePgnGame(PgnGame game) {
+        loadPgnGame(game);
+
+        if (gameAnalysisDialog != null) {
+            gameAnalysisDialog.dispose();
+        }
+
+        gameAnalysisDialog = new GameAnalysisDialog(this, game, this::showMainLinePosition);
+        gameAnalysisDialog.setVisible(true);
+        gameAnalysisDialog.start();
+    }
+
+    /** Shows the position after {@code ply} moves of the main line (0 = the start). */
+    private void showMainLinePosition(int ply) {
+        if (isEditorMode || rootNode == null) {
+            return;
+        }
+
+        MoveNode node = rootNode;
+        for (int i = 0; i < ply && !node.children.isEmpty(); i++) {
+            node = node.children.get(0);
+        }
+        selectNode(node);
     }
 
     private void makeEngineMove() {

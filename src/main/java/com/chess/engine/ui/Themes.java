@@ -100,7 +100,7 @@ public final class Themes {
             return false;
         }
 
-        /** Paints {@code piece} (FEN letter, upper case = White) in the square x, y, size x size. */
+        /*Paints {@code piece} (FEN letter, upper case = White) in the square x, y, size x size. */
         public abstract void paint(Graphics2D g, char piece, int x, int y, int size);
 
         @Override

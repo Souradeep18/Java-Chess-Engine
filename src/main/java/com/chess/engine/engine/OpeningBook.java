@@ -318,9 +318,7 @@ public final class OpeningBook {
         return found;
     }
 
-    // ------------------------------------------------------------------
     //  Built-in repertoire: both colours, main lines and the important side lines.
-    // ------------------------------------------------------------------
     private static final String[] LINES = {
 
         // ===== RUY LOPEZ =====
@@ -384,6 +382,8 @@ public final class OpeningBook {
         "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6 Bc4 e6 Bb3 b5 O-O Be7 Qf3 Qc7",
         //Najdorf-(Fischer-Solzen Attack)
         "e4 c5 Nf3 d6 d4 cxd4 Nxd4 a6 Bc4 e6",
+        //Najdorf-(Fischer-Solzen Attack-aggressive line)
+        "e4 c5 Nf3 d6 d4 cxd4 Nxd4 a6 Bc4 e6 Bb3 b5 O-O Be7 Qf3 Qc7 Qg4 O-O Bh6 Ne8",
         //Fischer-Solzen main line
         "e4 c5 Nf3 d6 d4 cxd4 Nxd4 a6 Bc4 e6 a4 Be7 Qe2",
         "e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 g6 Be3 Bg7 f3 O-O Qd2 Nc6 Bc4 Bd7 O-O-O Rc8 Bb3 Ne5 h4 h5 Bg5 Rc5 f4 Nc4 Bxc4 Rxc4 Bxf6 Bxf6 Nd5",
@@ -510,6 +510,12 @@ public final class OpeningBook {
         "e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5 exd5 Na5 Bb5+ c6 dxc6 bxc6 Be2 h6 Nf3 e4 Ne5 Bd6 d4 exd3 Nxd3 Qc7",
         // Italian, Two Knights, Fried Liver
         "e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5 exd5 Nxd5 Nxf7 Kxf7 Qf3+ Ke6 Nc3 Nb4 Qe4 c6 a3 Na6 d4 Nac7",
+        //Italian, Two Knights, Fried Liver, Traxler Counterattack(tricky line)
+        "e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 Bc5 Nxf7 Bxf2+ Kf1 Qe7 Nxh8 d5 exd5 Ne4",
+        //Italian, Two Knights, Fried Liver, Traxler Counterattack(main line)
+        "e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 Bc5 Nxf7 Bxf2+ Kxf2 Nxe4+ Ke4 Qh5",
+        //Italian, Two Knights, Fried Liver, Traxler Counterattack(main line for white advantage)
+        "e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 Bc5 Bxf7+ Ke7 Bc4 Rf8 Nc3 h6 Nf3 d6 O-O Qe7 Be2 a5",
         // Italian, Two Knights, 5...Nd4
         "e4 e5 Nf3 Nc6 Bc4 Nf6 Ng5 d5 exd5 Nd4 c3 b5 Bf1 Nxd5 Ne4 Qh4 Ng3 Bb7 d3 h6",
         // Italian, Two Knights, 4.d3

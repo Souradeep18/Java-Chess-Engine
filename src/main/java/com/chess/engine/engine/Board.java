@@ -39,7 +39,7 @@ public class Board {
     private int whiteChecks = 0;
     private int blackChecks = 0;
 
-    // --- Optimization Structures: Zobrist Keys & Move Undo History ---
+    // Optimization Structures: Zobrist Keys & Move Undo History 
     private long zobristKey = 0L;
     private static final long[][][] ZOBRIST_PIECES = new long[64][12][1];
     private static final long[] ZOBRIST_CASTLING = new long[16];
@@ -75,7 +75,23 @@ public class Board {
         int blackChecks;
     }
 
-    private final Deque<UndoState> undoStack = new ArrayDeque<>();
+    // pre-allocated undo records (a makeMove must not allocate: the search makes millions of them)
+    private UndoState[] undoStack = new UndoState[256];
+    private int undoTop = 0;
+
+    private UndoState pushUndo() {
+        if (undoTop == undoStack.length) {
+            undoStack = Arrays.copyOf(undoStack, undoStack.length * 2);
+        }
+        UndoState st = undoStack[undoTop];
+        if (st == null) {
+            st = new UndoState();
+            undoStack[undoTop] = st;
+        }
+        undoTop++;
+        st.exploded = null;
+        return st;
+    }
 
     public Board() {
         setupStartingPosition();
@@ -136,7 +152,7 @@ public class Board {
         whiteChecks = 0;
         blackChecks = 0;
         enPassantSquare = -1;
-        undoStack.clear();
+        undoTop = 0;
 
         recalculateZobristKey();
     }
@@ -268,7 +284,7 @@ public class Board {
 
     // --- Null Move Pruning (NMP) Support ---
     public void makeNullMove() {
-        UndoState state = new UndoState();
+        UndoState state = pushUndo();
         state.whiteKingSideCastle = whiteKingSideCastle;
         state.whiteQueenSideCastle = whiteQueenSideCastle;
         state.blackKingSideCastle = blackKingSideCastle;
@@ -277,7 +293,6 @@ public class Board {
         state.capturedPiece = '.';
         state.zobristKey = zobristKey;
         state.isNullMove = true;
-        undoStack.push(state);
 
         // Clear En Passant square if active
         if (enPassantSquare != -1) {
@@ -292,8 +307,8 @@ public class Board {
     }
 
     public void undoNullMove() {
-        if (undoStack.isEmpty()) return;
-        UndoState state = undoStack.pop();
+        if (undoTop == 0) return;
+        UndoState state = undoStack[--undoTop];
 
         this.whiteToMove = !this.whiteToMove;
         this.whiteKingSideCastle = state.whiteKingSideCastle;
@@ -304,9 +319,9 @@ public class Board {
         this.zobristKey = state.zobristKey;
     }
 
-    // --- Move Execution & Undo Stack ---
+    // Move Execution & Undo Stack
     public void makeMove(Move move) {
-        UndoState state = new UndoState();
+        UndoState state = pushUndo();
         state.whiteKingSideCastle = whiteKingSideCastle;
         state.whiteQueenSideCastle = whiteQueenSideCastle;
         state.blackKingSideCastle = blackKingSideCastle;
@@ -317,7 +332,11 @@ public class Board {
         state.isNullMove = false;
         state.whiteChecks = whiteChecks;
         state.blackChecks = blackChecks;
-        undoStack.push(state);
+
+        final long oldKey = zobristKey;
+        final int oldCastleBits = (whiteKingSideCastle ? 1 : 0) | (whiteQueenSideCastle ? 2 : 0)
+                | (blackKingSideCastle ? 4 : 0) | (blackQueenSideCastle ? 8 : 0);
+        final int oldEp = enPassantSquare;
 
         char movingPiece = board[move.fromSquare];
 
@@ -385,12 +404,44 @@ public class Board {
             }
         }
 
-        recalculateZobristKey();
+        if (atomic || castle960) {
+            recalculateZobristKey();           // explosions / 960 castling move several pieces: plain recompute
+        } else {
+            // incremental update (identical to recalculateZobristKey)
+            long key = oldKey;
+            char placed = board[move.toSquare];
+            key ^= ZOBRIST_FLAT[move.fromSquare * 12 + PIECE_INDEX[movingPiece & 127]];
+            if (state.capturedPiece != '.') {
+                key ^= ZOBRIST_FLAT[move.toSquare * 12 + PIECE_INDEX[state.capturedPiece & 127]];
+            }
+            key ^= ZOBRIST_FLAT[move.toSquare * 12 + PIECE_INDEX[placed & 127]];
+            if (move.isEnPassant) {
+                int capSq = move.toSquare + (movingPiece == 'P' ? -8 : 8);
+                key ^= ZOBRIST_FLAT[capSq * 12 + PIECE_INDEX[(movingPiece == 'P' ? 'p' : 'P') & 127]];
+            }
+            if (move.isCastle) {
+                if (move.toSquare == 6) {
+                    key ^= ZOBRIST_FLAT[7 * 12 + 3] ^ ZOBRIST_FLAT[5 * 12 + 3];
+                } else if (move.toSquare == 2) {
+                    key ^= ZOBRIST_FLAT[0 * 12 + 3] ^ ZOBRIST_FLAT[3 * 12 + 3];
+                } else if (move.toSquare == 62) {
+                    key ^= ZOBRIST_FLAT[63 * 12 + 9] ^ ZOBRIST_FLAT[61 * 12 + 9];
+                } else if (move.toSquare == 58) {
+                    key ^= ZOBRIST_FLAT[56 * 12 + 9] ^ ZOBRIST_FLAT[59 * 12 + 9];
+                }
+            }
+            int newCastleBits = (whiteKingSideCastle ? 1 : 0) | (whiteQueenSideCastle ? 2 : 0)
+                    | (blackKingSideCastle ? 4 : 0) | (blackQueenSideCastle ? 8 : 0);
+            key ^= ZOBRIST_CASTLING[oldCastleBits] ^ ZOBRIST_CASTLING[newCastleBits];
+            key ^= ZOBRIST_EN_PASSANT[oldEp == -1 ? 64 : oldEp] ^ ZOBRIST_EN_PASSANT[enPassantSquare == -1 ? 64 : enPassantSquare];
+            key ^= ZOBRIST_SIDE;
+            zobristKey = key;
+        }
     }
 
     public void undoMove(Move move) {
-        if (undoStack.isEmpty()) return;
-        UndoState state = undoStack.pop();
+        if (undoTop == 0) return;
+        UndoState state = undoStack[--undoTop];
 
         if (state.isNullMove) {
             this.whiteToMove = !this.whiteToMove;
@@ -596,8 +647,8 @@ public class Board {
             }
 
             // Captures
-            int[] capOffsets = whiteToMove ? new int[]{7, 9} : new int[]{-7, -9};
-            for (int off : capOffsets) {
+            for (int oi = 0; oi < 2; oi++) {
+                int off = whiteToMove ? (oi == 0 ? 7 : 9) : (oi == 0 ? -7 : -9);
                 int cSq = sq + off;
                 if (cSq >= 0 && cSq < 64 && Math.abs((cSq % 8) - file) == 1) {
                     if (!quietsOnly && board[cSq] != '.' && (whiteToMove != Character.isUpperCase(board[cSq]))) {
@@ -695,13 +746,19 @@ public class Board {
         }
     }
 
+    private static final int[][] VEC_N = {{2,1},{1,2},{-1,2},{-2,1},{-2,-1},{-1,-2},{1,-2},{2,-1}};
+    private static final int[][] VEC_B = {{1,1},{1,-1},{-1,1},{-1,-1}};
+    private static final int[][] VEC_R = {{1,0},{-1,0},{0,1},{0,-1}};
+    private static final int[][] VEC_Q = {{1,1},{1,-1},{-1,1},{-1,-1},{1,0},{-1,0},{0,1},{0,-1}};
+    private static final int[][] VEC_NONE = new int[0][0];
+
     private int[][] getPieceVectors(char type) {
         switch (type) {
-            case 'N': return new int[][]{{2,1},{1,2},{-1,2},{-2,1},{-2,-1},{-1,-2},{1,-2},{2,-1}};
-            case 'B': return new int[][]{{1,1},{1,-1},{-1,1},{-1,-1}};
-            case 'R': return new int[][]{{1,0},{-1,0},{0,1},{0,-1}};
-            case 'Q': case 'K': return new int[][]{{1,1},{1,-1},{-1,1},{-1,-1},{1,0},{-1,0},{0,1},{0,-1}};
-            default: return new int[0][0];
+            case 'N': return VEC_N;
+            case 'B': return VEC_B;
+            case 'R': return VEC_R;
+            case 'Q': case 'K': return VEC_Q;
+            default: return VEC_NONE;
         }
     }
 
@@ -712,61 +769,55 @@ public class Board {
         return board.isSquareAttackedBy(targetSq, byWhite);
     }
 
+    private static final int[] KN_DF = {1, 2, 2, 1, -1, -2, -2, -1};
+    private static final int[] KN_DR = {2, 1, -1, -2, -2, -1, 1, 2};
+    private static final int[] QV_DR = {1, 1, -1, -1, 1, -1, 0, 0};
+    private static final int[] QV_DF = {1, -1, 1, -1, 0, 0, 1, -1};
+
     public boolean isSquareAttackedBy(int targetSq, boolean byWhite) {
-        int targetRank = targetSq / 8;
-        int targetFile = targetSq % 8;
+        final int targetRank = targetSq >> 3;
+        final int targetFile = targetSq & 7;
+        final char[] b = board;
 
-        // 1. Pawn Attacks
-        int[] pawnOffsets = byWhite ? new int[]{-7, -9} : new int[]{7, 9};
-        for (int off : pawnOffsets) {
-            int attackerSq = targetSq + off;
-            if (attackerSq >= 0 && attackerSq < 64) {
-                int attackerFile = attackerSq % 8;
-                if (Math.abs(attackerFile - targetFile) == 1) {
-                    char p = board[attackerSq];
-                    if (p == (byWhite ? 'P' : 'p')) return true;
-                }
-            }
+        // 1. pawns (a white pawn attacks upwards, so it stands one rank below the target)
+        final char pawn = byWhite ? 'P' : 'p';
+        final int pr = byWhite ? targetRank - 1 : targetRank + 1;
+        if (pr >= 0 && pr < 8) {
+            if (targetFile > 0 && b[pr * 8 + targetFile - 1] == pawn) return true;
+            if (targetFile < 7 && b[pr * 8 + targetFile + 1] == pawn) return true;
         }
 
-        // 2. Knight Attacks
-        int[][] knightVectors = getPieceVectors('N');
-        for (int[] vec : knightVectors) {
-            int r = targetRank + vec[0];
-            int f = targetFile + vec[1];
-            if (r >= 0 && r < 8 && f >= 0 && f < 8) {
-                char p = board[r * 8 + f];
-                if (p == (byWhite ? 'N' : 'n')) return true;
-            }
+        // 2. knights
+        final char knight = byWhite ? 'N' : 'n';
+        for (int k = 0; k < 8; k++) {
+            int r = targetRank + KN_DR[k];
+            int f = targetFile + KN_DF[k];
+            if (r >= 0 && r < 8 && f >= 0 && f < 8 && b[r * 8 + f] == knight) return true;
         }
 
-        // 3. Sliding Attacks (Rook, Bishop, Queen) & King Attacks
-        int[][] directions = getPieceVectors('Q');
-        for (int[] vec : directions) {
-            int r = targetRank + vec[0];
-            int f = targetFile + vec[1];
-            boolean isDiagonal = (vec[0] != 0 && vec[1] != 0);
-            int step = 1;
-
+        // 3. sliders and the king
+        final char rook = byWhite ? 'R' : 'r';
+        final char bishop = byWhite ? 'B' : 'b';
+        final char queen = byWhite ? 'Q' : 'q';
+        final char king = byWhite ? 'K' : 'k';
+        for (int d = 0; d < 8; d++) {
+            final int dr = QV_DR[d], df = QV_DF[d];
+            final char slider = d < 4 ? bishop : rook;
+            int r = targetRank + dr;
+            int f = targetFile + df;
+            boolean first = true;
             while (r >= 0 && r < 8 && f >= 0 && f < 8) {
-                char p = board[r * 8 + f];
+                char p = b[r * 8 + f];
                 if (p != '.') {
-                    boolean isAttackerColor = byWhite ? Character.isUpperCase(p) : Character.isLowerCase(p);
-                    if (isAttackerColor) {
-                        char type = Character.toUpperCase(p);
-                        if (type == 'Q') return true;
-                        if (isDiagonal && type == 'B') return true;
-                        if (!isDiagonal && type == 'R') return true;
-                        if (step == 1 && type == 'K' && !atomic) return true;
-                    }
-                    break; // Blocked by another piece
+                    if (p == queen || p == slider) return true;
+                    if (first && p == king && !atomic) return true;
+                    break;
                 }
-                r += vec[0];
-                f += vec[1];
-                step++;
+                first = false;
+                r += dr;
+                f += df;
             }
         }
-
         return false;
     }
 
@@ -778,9 +829,10 @@ public class Board {
         }
 
         int kingSq = -1;
-        char kingChar = sideWhite ? 'K' : 'k';
+        final char kingChar = sideWhite ? 'K' : 'k';
+        final char[] bd = board;
         for (int i = 0; i < 64; i++) {
-            if (board[i] == kingChar) {
+            if (bd[i] == kingChar) {
                 kingSq = i;
                 break;
             }
