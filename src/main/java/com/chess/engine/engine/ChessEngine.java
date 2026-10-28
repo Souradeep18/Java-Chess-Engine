@@ -26,12 +26,11 @@ public class ChessEngine {
     static {
         for (int d = 1; d < 64; d++) {
             for (int m = 1; m < 64; m++) {
-                // Slightly conservative LMR formula to avoid pruning subtle tactical defenses
-                LMR[d][m] = (int) (0.5 + Math.log(d) * Math.log(m) / 3.2);
+                LMR[d][m] = (int) (0.5 + Math.log(d) * Math.log(m) / 3.1);
             }
         }
     }
-    private static final int RFP_MARGIN = 120;
+    private static final int RFP_MARGIN = 110;
 
     // TT Entry Flags
     private static final byte EXACT = 0;
@@ -184,7 +183,6 @@ public class ChessEngine {
     private void ttPut(TTEntry entry) {
         int idx = ttIndex(entry.key);
         TTEntry existing = tt[idx];
-        // Prefer deeper entries or replace entries from matching keys
         if (existing == null || entry.depth >= existing.depth - 2 || existing.key == entry.key) {
             tt[idx] = entry;
         }
@@ -482,7 +480,6 @@ public class ChessEngine {
 
         boolean inCheck = board.isInCheck(board.isWhiteToMove());
         int searchDepth = depth;
-        // Search extension on check to ensure calculation stability
         if (inCheck && ply < MAX_PLY) {
             searchDepth++;
         }
@@ -589,7 +586,6 @@ public class ChessEngine {
             int newDepth = searchDepth - 1 + (seventh ? 1 : 0);
             int score;
 
-            // Principal Variation Search (PVS) with LMR tuning
             if (i == 0) {
                 score = -alphaBeta(board, newDepth, ply + 1, -beta, -alpha, true);
             } else {
@@ -712,7 +708,6 @@ public class ChessEngine {
             if (standPat > alpha) alpha = standPat;
         }
 
-        // Search full moves when in check or early plies to ensure non-capture checks don't lead to outcalculation
         List<Move> moves = (inCheck || ply <= 2) ? board.generateLegalMoves() : board.generateCaptures();
 
         if (moves.isEmpty()) {
@@ -1233,8 +1228,8 @@ public class ChessEngine {
         private static final int[] ATTACK_W = {0, 0, 2, 2, 3, 5, 0};
         private static final int[] TROP = {0, 0, 2, 1, 1, 3, 0};
 
-        private static final int AGGRESSION_PCT = 170;
-        private static final int SELF_DEFENCE_PCT = 190;
+        private static final int AGGRESSION_PCT = 175;
+        private static final int SELF_DEFENCE_PCT = 195;
 
         private static final int[][] KNIGHT = new int[64][];
         private static final int[][] KING = new int[64][];
@@ -1717,6 +1712,11 @@ public class ChessEngine {
                 boolean[] enemyZone = zoneOf[1 - c];
                 int sign = c == 0 ? 1 : -1;
 
+                // Penalty for pinned pieces
+                if (isPinnedPiece(s, c)) {
+                    pv -= 25;
+                }
+
                 switch (t) {
                     case N: {
                         for (int tg : KNIGHT[s]) {
@@ -2153,6 +2153,43 @@ public class ChessEngine {
             return score;
         }
 
+        private boolean isPinnedPiece(int s, int c) {
+            int k = kingSq[c];
+            int kr = k >> 3, kf = k & 7;
+            int sr = s >> 3, sf = s & 7;
+            int dr = sr - kr, df = sf - kf;
+            if (dr != 0 && df != 0 && Math.abs(dr) != Math.abs(df)) return false;
+
+            int stepR = Integer.compare(dr, 0);
+            int stepF = Integer.compare(df, 0);
+            int r = kr + stepR, f = kf + stepF;
+            boolean foundMid = false;
+
+            while (r >= 0 && r < 8 && f >= 0 && f < 8) {
+                int idx = r * 8 + f;
+                if (idx == s) {
+                    foundMid = true;
+                } else if (sq[idx] != 0) {
+                    if (foundMid) {
+                        int piece = sq[idx];
+                        boolean enemy = (piece > 0) != (c == 0);
+                        if (enemy) {
+                            int t = Math.abs(piece);
+                            if (stepR == 0 || stepF == 0) {
+                                if (t == R || t == Q) return true;
+                            } else {
+                                if (t == B || t == Q) return true;
+                            }
+                        }
+                    }
+                    break;
+                }
+                r += stepR;
+                f += stepF;
+            }
+            return false;
+        }
+
         private static int promotionSquare(int c, int f) {
             return (c == 0 ? 56 : 0) + f;
         }
@@ -2165,10 +2202,6 @@ public class ChessEngine {
                 file = f;
             }
             return file;
-        }
-
-        private static boolean bishopOrRookFile(int f) {
-            return f == 0 || f == 2 || f == 5 || f == 7;
         }
 
         private int queenEndgamePatterns(int score, int pw0, int pw1) {
