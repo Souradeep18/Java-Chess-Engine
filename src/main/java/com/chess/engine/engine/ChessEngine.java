@@ -120,6 +120,7 @@ public class ChessEngine {
         final Map<Long, Integer> historyCopy = new HashMap<>(gameHistory);
         for (int i = 0; i < n; i++) {
             final ChessEngine h = helpers.get(i);
+            h.clockAt[0] = clockAt[0];
             final Board hb = root.copy();
             final int index = i;
             h.cancelled = false;
@@ -250,6 +251,7 @@ public class ChessEngine {
         clearHistory();
         prepareTables(board);
 
+        clockAt[0] = computeRootClock(board, previousPositions);
         gameHistory.clear();
         if (previousPositions != null) {
             for (Board b : previousPositions) {
@@ -415,7 +417,7 @@ public class ChessEngine {
 
     private int alphaBeta(Board board, int depth, int ply, int alpha, int beta, boolean allowNull) {
         if (checkTimeout()) return 0;
-        if (ply >= PATH_SIZE - 2) return evaluate(board);
+        if (ply >= PATH_SIZE - 2) return evaluate(board, ply);
         nodes++;
 
         int originalAlpha = alpha;
@@ -490,7 +492,7 @@ public class ChessEngine {
 
         evalStack[ply] = NO_EVAL;
         if (ply > 0 && !inCheck && standardLike(board)) {
-            staticEval = evaluate(board);
+            staticEval = evaluate(board, ply);
             evalKnown = true;
             evalStack[ply] = staticEval;
         }
@@ -517,7 +519,7 @@ public class ChessEngine {
         // Null Move Pruning
         if (allowNull && !inCheck && searchDepth >= 3 && hasNonPawnMaterial(board)
                 && !board.isAntiChess() && !board.isRacingKings()
-                && (evalKnown ? staticEval : evaluate(board)) >= beta) {
+                && (evalKnown ? staticEval : evaluate(board, ply)) >= beta) {
             board.makeNullMove();
             int R = searchDepth >= 6 ? 3 : 2;
             R = Math.min(R, searchDepth - 1);
@@ -574,6 +576,7 @@ public class ChessEngine {
             boolean lateQuiet = lmpOk && quiet && !seventh && !killer && i >= lmpLimit && lmrAllowed;
             boolean prunableMove = (futilityOk && quiet && !seventh && i > 0) || lateQuiet;
 
+            clockAt[ply + 1] = (move.isCapture() || Character.toUpperCase(board.getPieceTypeAt(move.from)) == 'P') ? 0 : clockAt[ply] + 1;
             board.makeMove(move);
 
             boolean givesCheck = board.isInCheck(board.isWhiteToMove());
@@ -661,7 +664,7 @@ public class ChessEngine {
 
     private int quiescenceSearch(Board board, int alpha, int beta, int ply) {
         if (checkTimeout()) return 0;
-        if (ply >= PATH_SIZE - 2) return evaluate(board);
+        if (ply >= PATH_SIZE - 2) return evaluate(board, ply);
         nodes++;
 
         if (board.isAtomic()) {
@@ -685,13 +688,13 @@ public class ChessEngine {
                 boolean sideToMoveWon = (outcome == 1) == board.isWhiteToMove();
                 return sideToMoveWon ? CHECKMATE_SCORE - ply : -CHECKMATE_SCORE + ply;
             }
-            return evaluate(board);
+            return evaluate(board, ply);
         }
 
         if (board.isAntiChess()) {
             if (AntiChess.hasNoPieces(board, board.isWhiteToMove())) return CHECKMATE_SCORE - ply;
             if (AntiChess.hasNoPieces(board, !board.isWhiteToMove())) return -CHECKMATE_SCORE + ply;
-            return evaluate(board);
+            return evaluate(board, ply);
         }
 
         boolean inCheck = board.isInCheck(board.isWhiteToMove());
@@ -703,7 +706,7 @@ public class ChessEngine {
         }
 
         if (!inCheck) {
-            standPat = evaluate(board);
+            standPat = evaluate(board, ply);
             if (standPat >= beta) return beta;
             if (standPat > alpha) alpha = standPat;
         }
@@ -735,6 +738,7 @@ public class ChessEngine {
                 }
             }
 
+            clockAt[ply + 1] = 0;
             board.makeMove(move);
             int score = -quiescenceSearch(board, -beta, -alpha, ply + 1);
             board.undoMove(move);
@@ -999,6 +1003,44 @@ public class ChessEngine {
 
     private void evalCacheClear() {
         Arrays.fill(evalKeys, 0L);
+    }
+
+    private final int[] clockAt = new int[PATH_SIZE + 2];
+    private static final int CLOCK_DIV = 200;
+
+    /** Evaluation drained by the number of reversible plies played so far: when ahead, shuffling loses
+     *  value and irreversible progress (pawn moves, trades) is preferred; when behind it is the reverse. */
+    private int evaluate(Board board, int ply) {
+        int v = evaluate(board);
+        int clk = clockAt[ply];
+        if (clk <= 0) return v;
+        return v * (CLOCK_DIV - Math.min(clk, 100)) / CLOCK_DIV;
+    }
+
+    private static boolean irreversibleStep(Board a, Board b) {
+        int ca = 0, cb = 0;
+        long pa = 0, pb = 0;
+        for (int i = 0; i < 64; i++) {
+            char x = a.getPiece(i), y = b.getPiece(i);
+            if (x != '.') ca++;
+            if (y != '.') cb++;
+            if (x == 'P' || x == 'p') pa |= 1L << i;
+            if (y == 'P' || y == 'p') pb |= 1L << i;
+        }
+        return ca != cb || pa != pb;
+    }
+
+    private static int computeRootClock(Board root, List<Board> prev) {
+        if (prev == null || prev.isEmpty()) return 0;
+        int clk = 0;
+        Board next = root;
+        for (int i = prev.size() - 1; i >= 0; i--) {
+            Board cur = prev.get(i);
+            if (irreversibleStep(cur, next)) break;
+            clk++;
+            next = cur;
+        }
+        return clk;
     }
 
     private int evaluate(Board board) {
