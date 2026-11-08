@@ -18,7 +18,7 @@ public final class AntiChess {
     private AntiChess() {
     }
 
-    // ------------------------------------------------------------------ piece counts & evaluation
+    // piece counts & evaluation
 
     public static boolean hasNoPieces(Board board, boolean white) {
         for (int sq = 0; sq < 64; sq++) {

@@ -69,11 +69,8 @@ public final class PgnGame {
         return getTag("Black", "Black");
     }
 
-    // ------------------------------------------------------------------------------------------
     //  parsing
-    // ------------------------------------------------------------------------------------------
-
-    /** @throws IllegalArgumentException with a readable message when the text is not a playable game */
+    // throws IllegalArgumentException with a readable message when the text is not a playable game 
     public static PgnGame parse(String text) {
         if (text == null || text.trim().isEmpty()) {
             throw new IllegalArgumentException("Paste the game in PGN format first.");
@@ -89,13 +86,13 @@ public final class PgnGame {
         for (String line : pgn.split("\n")) {
             String t = line.trim();
             if (t.startsWith("%")) {
-                continue;                                   // escape mechanism: ignored
+                continue; // escape mechanism: ignored
             }
             if (t.startsWith("[")) {
                 Matcher m = TAG.matcher(t);
                 boolean any = false;
                 if (seenMoves) {
-                    break;                                  // the tags of a second game
+                    break;  // the tags of a second game
                 }
                 while (m.find()) {
                     any = true;
@@ -165,7 +162,7 @@ public final class PgnGame {
         return new PgnGame(tags, start, moves, sans, result);
     }
 
-    /** Removes comments, variations, NAGs and move numbers, leaving only the move tokens and the result. */
+    /* Removes comments, variations, NAGs and move numbers, leaving only the move tokens and the result. */
     private static String stripAnnotations(String text) {
         StringBuilder out = new StringBuilder();
         int braces = 0;

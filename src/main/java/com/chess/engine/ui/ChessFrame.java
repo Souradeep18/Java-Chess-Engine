@@ -69,6 +69,23 @@ public class ChessFrame extends JFrame {
     private final JButton tourButton;
     private final JButton settingsButton;
 
+    // Navbar and the screens it opens (one class per feature)
+    private static final String CARD_ANALYSIS = "analysis";
+    private static final String CARD_PLAY = "play";
+    private static final String CARD_PUZZLES = "puzzles";
+    private static final String CARD_RUSH = "rush";
+    private static final String CARD_LEARN = "learn";
+    private static final String CARD_COORDS = "coords";
+    private final NavBar navBar;
+    private final CardLayout cardLayout = new CardLayout();
+    private final JPanel cards = new JPanel(cardLayout);
+    private final PlayPanel playPanel = new PlayPanel();
+    private final PuzzlePanel puzzlePanel = new PuzzlePanel();
+    private final PuzzleRushPanel rushPanel = new PuzzleRushPanel();
+    private final LearnPanel learnPanel = new LearnPanel();
+    private final CoordinatesPanel coordinatesPanel = new CoordinatesPanel();
+    private String currentCard = CARD_ANALYSIS;
+
     // Board editor: variant chooser (replaces the GAME section while editing)
     private final JComboBox<String> variantCombo;
     private final JPanel gameSection;
@@ -150,12 +167,23 @@ public class ChessFrame extends JFrame {
 
         boardPanel = new ChessBoardPanel(initialBoard);
 
-        // Header Title
-        JLabel titleLabel = new JLabel("JAVA CHESS ENGINE", SwingConstants.CENTER);
-        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 20));
-        titleLabel.setBorder(new EmptyBorder(10, 10, 10, 10));
-
-        add(titleLabel, BorderLayout.NORTH);
+        // Navigation bar (PLAY, PUZZLES, LEARN, TOOLS) replaces the old title
+        navBar = new NavBar(new NavBar.Listener() {
+            @Override public void onPlay() { showPlay(); }
+            @Override public void onPuzzles() { showCard(CARD_PUZZLES, "PUZZLES"); }
+            @Override public void onPuzzleRush() { showCard(CARD_RUSH, "PUZZLES"); }
+            @Override public void onChessPrinciples() { showCard(CARD_LEARN, "LEARN"); }
+            @Override public void onCoordinates() { showCard(CARD_COORDS, "LEARN"); }
+            @Override public void onAnalysisBoard() { showCard(CARD_ANALYSIS, "TOOLS"); }
+            @Override public void onKnightsTour() {
+                showCard(CARD_ANALYSIS, "TOOLS");
+                if (tourButton.isEnabled()) {
+                    toggleKnightsTour();
+                }
+            }
+            @Override public void onThemes() { openThemes(); }
+        });
+        add(navBar, BorderLayout.NORTH);
 
         // --- Side Control Panel ---
         JPanel sidePanel = new JPanel();
@@ -577,7 +605,7 @@ public class ChessFrame extends JFrame {
         themesItem.addActionListener(e ->
                 ThemesDialog.open(SwingUtilities.getWindowAncestor(this), boardPanel::applyTheme));
         settingsMenu.add(themesItem);
-        settingsButton.addActionListener(e -> settingsMenu.show(settingsButton, 0, settingsButton.getHeight()));
+        // (the gear and the knight buttons now live in the navbar's TOOLS menu; settingsMenu is kept for reference)
 
         JPanel eastBottom = new JPanel();
         eastBottom.setOpaque(false);
@@ -585,23 +613,30 @@ public class ChessFrame extends JFrame {
         bottomCheckPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         settingsButton.setAlignmentX(Component.LEFT_ALIGNMENT);
         eastBottom.add(bottomCheckPanel);
-        eastBottom.add(Box.createVerticalStrut(10));
-        eastBottom.add(settingsButton);
 
         JPanel eastTop = new JPanel();
         eastTop.setOpaque(false);
         eastTop.setLayout(new BoxLayout(eastTop, BoxLayout.Y_AXIS));
         tourButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-        eastTop.add(tourButton);
-        eastTop.add(Box.createVerticalStrut(10));
         eastTop.add(topCheckPanel);
 
         tourButtonPanel.add(eastTop, BorderLayout.NORTH);
         tourButtonPanel.add(eastBottom, BorderLayout.SOUTH);
         boardContainer.add(tourButtonPanel, BorderLayout.EAST);
 
-        add(boardContainer, BorderLayout.CENTER);
-        add(sidePanel, BorderLayout.EAST);
+        // The analysis board (everything that used to fill the window) is one card; the navbar's features are the others.
+        JPanel analysisCard = new JPanel(new BorderLayout());
+        analysisCard.add(boardContainer, BorderLayout.CENTER);
+        analysisCard.add(sidePanel, BorderLayout.EAST);
+
+        cards.add(analysisCard, CARD_ANALYSIS);
+        cards.add(playPanel, CARD_PLAY);
+        cards.add(puzzlePanel, CARD_PUZZLES);
+        cards.add(rushPanel, CARD_RUSH);
+        cards.add(learnPanel, CARD_LEARN);
+        cards.add(coordinatesPanel, CARD_COORDS);
+        add(cards, BorderLayout.CENTER);
+        showCard(CARD_ANALYSIS, "");
 
         knightsTour = new KnightsTour(this, boardPanel, sidePanel, this::onKnightsTourClosed);
         tourButton.addActionListener(e -> toggleKnightsTour());
@@ -1271,6 +1306,48 @@ public class ChessFrame extends JFrame {
         backButton.setEnabled(enabled && currentNode.parent != null);
         forwardButton.setEnabled(enabled && !currentNode.children.isEmpty());
         flipButton.setEnabled(enabled);
+    }
+
+    // --- Navbar ---
+    private void showPlay() {
+        showCard(CARD_PLAY, "PLAY");
+        playPanel.showDialogAndStart();
+    }
+
+    private void openThemes() {
+        ThemesDialog.open(SwingUtilities.getWindowAncestor(this), () -> {
+            boardPanel.applyTheme();
+            playPanel.applyTheme();
+            puzzlePanel.applyTheme();
+            rushPanel.applyTheme();
+            repaint();
+        });
+    }
+
+    /** Shows one of the screens and highlights its navbar section. */
+    private void showCard(String card, String section) {
+        if (!CARD_ANALYSIS.equals(card) && knightsTour != null && knightsTour.isActive()) {
+            knightsTour.cancel();
+        }
+        if (CARD_RUSH.equals(currentCard) && !CARD_RUSH.equals(card)) {
+            rushPanel.deactivate();
+        }
+        if (CARD_COORDS.equals(currentCard) && !CARD_COORDS.equals(card)) {
+            coordinatesPanel.deactivate();
+        }
+        if (CARD_PLAY.equals(currentCard) && !CARD_PLAY.equals(card)) {
+            playPanel.deactivate();
+        }
+        currentCard = card;
+        cardLayout.show(cards, card);
+        navBar.setActiveSection(section);
+        switch (card) {
+            case CARD_PUZZLES: puzzlePanel.activate(); break;
+            case CARD_RUSH: rushPanel.activate(); break;
+            case CARD_LEARN: learnPanel.activate(); break;
+            case CARD_COORDS: coordinatesPanel.activate(); break;
+            default: break;
+        }
     }
 
     // --- Knight's Tour ---

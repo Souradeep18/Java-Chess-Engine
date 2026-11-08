@@ -2,16 +2,16 @@ package com.chess.engine.engine;
 
 import java.util.List;
 
-/**
- * Horde chess rules.
- *
- * 
- *   White has no king: 36 pawns (all of ranks 1-4 plus b5, c5, f5, g5). Black has the normal pieces.
- *   White wins by checkmating the black king; Black wins by capturing every white piece.
- *   White pawns on the first and second rank may move two squares. Every other pawn
- *       moves one square and captures diagonally or en passant.
- *   An en passant capture is only possible after a double step from the second rank (or, for Black,
- *       the usual seventh rank); a double step from the first rank does not offer one.
+/*
+  Horde chess rules.
+ 
+ 
+   White has no king: 36 pawns (all of ranks 1-4 plus b5, c5, f5, g5). Black has the normal pieces.
+   White wins by checkmating the black king; Black wins by capturing every white piece.
+   White pawns on the first and second rank may move two squares. Every other pawn
+   moves one square and captures diagonally or en passant.
+    An en passant capture is only possible after a double step from the second rank (or, for Black,
+        the usual seventh rank); a double step from the first rank does not offer one.
  */
 public final class HordeChess {
 
@@ -31,7 +31,7 @@ public final class HordeChess {
     private HordeChess() {
     }
 
-    /** Puts the standard Horde starting position on the board (White to move, no white castling). */
+    /* Puts the standard Horde starting position on the board (White to move, no white castling). */
     public static void setupStartingPosition(Board board) {
         board.setHorde(true);
 
@@ -64,15 +64,15 @@ public final class HordeChess {
         board.setEnPassantSquare(-1);
     }
 
-    /**
-     * White pawns on the first rank may also move two squares (pawns on the second rank
-     * already can in standard chess).
+    /*
+      White pawns on the first rank may also move two squares (pawns on the second rank
+      already can in standard chess).
      */
     public static boolean canDoubleStepFromFirstRank(Board board, boolean whitePawn, int rank) {
         return board.isHorde() && whitePawn && rank == 0;
     }
 
-    /** A double step from the first rank does not give the opponent an en passant capture. */
+    /* A double step from the first rank does not give the opponent an en passant capture. */
     public static boolean doubleStepSetsEnPassant(Board board, int fromSquare) {
         return !(board.isHorde() && fromSquare / 8 == 0);
     }
@@ -87,7 +87,7 @@ public final class HordeChess {
         return true;
     }
 
-    /** Result of a Horde position (ONGOING for non-Horde boards). */
+    /* Result of a Horde position (ONGOING for non-Horde boards). */
     public static Result getResult(Board board) {
         if (!board.isHorde()) {
             return Result.ONGOING;
@@ -108,10 +108,10 @@ public final class HordeChess {
         return Result.ONGOING;
     }
 
-    /**
-     * Board editor rule check.
-     *
-     * @return a message describing why the piece cannot be put on that square, or null if it can
+    /*
+      Board editor rule check.
+     
+      @return a message describing why the piece cannot be put on that square, or null if it can
      */
     public static String placementError(Board board, int square, char piece) {
         int rank = square / 8;

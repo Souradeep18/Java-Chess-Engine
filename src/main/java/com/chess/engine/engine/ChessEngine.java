@@ -388,6 +388,156 @@ public class ChessEngine {
         return findBestMove(board, MOVE_MAX_DEPTH, MOVE_TIME_MILLIS, previousPositions);
     }
 
+    
+     /* Strength levels (1..8) for playing against people. Level 8 is the full engine.
+     Levels 1..7 search to a limited depth (always with the quiescence search, so pieces are never
+     left hanging) and then choose, with a weighted random draw, among the root moves that score
+     within a small margin of the best one.  The margin is always far below the value of a minor
+     piece, so a weak level can play inaccurately but never gives a piece away to a 1-2 move tactic.*/
+
+    public static final int LEVELS = 8;
+    private static final int[] LEVEL_DEPTH  = {0, 3, 4, 5, 6, 8, 10, 13, 24};
+    private static final int[] LEVEL_MARGIN = {0, 120, 90, 70, 50, 30, 18, 8, 0};
+    private static final int[] LEVEL_TEMP   = {1, 70, 50, 38, 28, 16, 10, 5, 1};
+    private static final long[] LEVEL_TIME_CAP = {0, 150, 300, 600, 1000, 1800, 3000, 5000, 0};
+    private final java.util.Random levelRng = new java.util.Random();
+
+    public Move findLevelMove(Board board, int level, long timeLimitMillis, List<Board> previousPositions) {
+        if (level >= LEVELS) {
+            return findBestMove(board, MOVE_MAX_DEPTH, timeLimitMillis, previousPositions);
+        }
+        level = Math.max(1, level);
+        cancelled = false;
+        final long levelBudget = Math.max(5, Math.min(timeLimitMillis, LEVEL_TIME_CAP[level]));
+        this.startTime = System.currentTimeMillis();
+        this.maxTimeMillis = Long.MAX_VALUE / 4;   // depths 1-2 are never cut short (they are what stops blunders)
+        this.timeUp = false;
+        this.nodes = 0;
+        this.rootBaseTime = 0;
+        this.panicExtensions = 2;
+
+        List<Move> rootLegal = board.generateLegalMoves();
+        if (rootLegal.isEmpty()) return null;
+        if (rootLegal.size() == 1) return rootLegal.get(0);
+
+        if (useBook && OpeningBook.isStandard(board)) {
+            Move bookMove = OpeningBook.probe(board);
+            if (bookMove != null) return bookMove;
+        }
+
+        clearKillerMoves();
+        clearHistory();
+        prepareTables(board);
+        clockAt[0] = computeRootClock(board, previousPositions);
+        gameHistory.clear();
+        if (previousPositions != null) {
+            for (Board b : previousPositions) gameHistory.merge(b.getZobristKey(), 1, Integer::sum);
+        }
+        positionEval.setEngineSide(board.isWhiteToMove() ? 0 : 1);
+        contempt = 20;
+        pathKeys[0] = board.getZobristKey();
+        this.startTime = System.currentTimeMillis();   // table clearing above does not eat the budget
+
+        final int margin = LEVEL_MARGIN[level];
+        final int maxDepth = LEVEL_DEPTH[level];
+        List<Move> order = new ArrayList<>(rootLegal);
+        Map<Move, Integer> prev = new HashMap<>();
+        List<Scored> chosenFrom = null;
+        int chosenBest = 0;
+
+        for (int depth = 1; depth <= maxDepth; depth++) {
+            if (depth == 3) this.maxTimeMillis = levelBudget;
+            final Map<Move, Integer> pv = prev;
+            order.sort((a, b) -> Integer.compare(pv.getOrDefault(b, -INFINITY), pv.getOrDefault(a, -INFINITY)));
+            List<Scored> scored = new ArrayList<>();
+            Map<Move, Integer> current = new HashMap<>();
+            int best = -INFINITY;
+            boolean aborted = false;
+            for (Move move : order) {
+                int alpha = (depth < 3 || best == -INFINITY) ? -INFINITY : best - margin - 1;
+                board.makeMove(move);
+                int score = -alphaBeta(board, depth - 1, 1, -INFINITY, alpha == -INFINITY ? INFINITY : -alpha, true);
+                board.undoMove(move);
+                if (timeUp) { aborted = true; break; }
+                current.put(move, score);
+                if (score > alpha) {
+                    scored.add(new Scored(move, score));
+                    if (score > best) best = score;
+                }
+            }
+            if (aborted) break;
+            prev = current;
+            chosenFrom = scored;
+            chosenBest = best;
+            if (Math.abs(best) > CHECKMATE_SCORE - 200) break;
+        }
+
+        if (chosenFrom == null || chosenFrom.isEmpty()) {
+            // not even depth 1 finished (extreme time trouble): any sensible move
+            return rootLegal.get(0);
+        }
+
+        // a forced mate (for either side) is never thrown away by the random draw
+        if (Math.abs(chosenBest) > CHECKMATE_SCORE - 200) {
+            Scored top = chosenFrom.get(0);
+            for (Scored sc : chosenFrom) if (sc.score > top.score) top = sc;
+            return top.move;
+        }
+
+        // Safety net for the weak levels: a candidate that (after captures are played out) loses material
+        // is dropped unless it is the move the search itself ranks first.
+        List<Scored> pool = new ArrayList<>();
+        for (Scored sc : chosenFrom) {
+            if (sc.score >= chosenBest - margin && sc.score > -CHECKMATE_SCORE + 200) pool.add(sc);
+        }
+        if (pool.size() > 1 && standardLike(board)) {
+            int[] mat = new int[pool.size()];
+            int bestMat = -INFINITY;
+            for (int i = 0; i < mat.length; i++) {
+                Move m = pool.get(i).move;
+                board.makeMove(m);
+                mat[i] = -materialQuiescence(board, -INFINITY, INFINITY, 0);
+                board.undoMove(m);
+                bestMat = Math.max(bestMat, mat[i]);
+            }
+            List<Scored> safe = new ArrayList<>();
+            for (int i = 0; i < mat.length; i++) {
+                boolean top = pool.get(i).score == chosenBest;
+                if (top || mat[i] >= bestMat - 60) safe.add(pool.get(i));
+            }
+            pool = safe;
+        }
+        if (pool.isEmpty()) return chosenFrom.get(0).move;
+        double total = 0;
+        double[] w = new double[pool.size()];
+        for (int i = 0; i < w.length; i++) {
+            w[i] = Math.exp(-(chosenBest - pool.get(i).score) / (double) LEVEL_TEMP[level]);
+            total += w[i];
+        }
+        double r = levelRng.nextDouble() * total;
+        for (int i = 0; i < w.length; i++) {
+            r -= w[i];
+            if (r <= 0) return pool.get(i).move;
+        }
+        return pool.get(pool.size() - 1).move;
+    }
+
+    /** Pure-material capture search, used only by the weak-level safety net. */
+    private int materialQuiescence(Board b, int alpha, int beta, int depth) {
+        int stand = positionEval.quickMaterial(b) * (b.isWhiteToMove() ? 1 : -1);
+        if (stand >= beta) return stand;
+        if (stand > alpha) alpha = stand;
+        if (depth >= 8) return stand;
+        for (Move m : b.generateCaptures()) {
+            b.makeMove(m);
+            int sc = -materialQuiescence(b, -beta, -alpha, depth + 1);
+            b.undoMove(m);
+            if (sc >= beta) return sc;
+            if (sc > alpha) alpha = sc;
+        }
+        return alpha;
+    }
+
     private int contemptFor(int score) {
         if (Math.abs(score) > CHECKMATE_SCORE - 200) return contempt;
         if (score >= 80) return Math.min(350, 60 + score / 2);
@@ -1435,6 +1585,18 @@ public class ChessEngine {
                 default: return 0;
             }
             return Character.isUpperCase(c) ? t : -t;
+        }
+
+        /* Plain material balance (white minus black); used by the weak-level safety net. */
+        int quickMaterial(Board board) {
+            int m = 0;
+            for (int s = 0; s < 64; s++) {
+                int p = pieceCode(board.getPiece(s));
+                if (p == 0) continue;
+                int v = VALUE[Math.abs(p)];
+                m += p > 0 ? v : -v;
+            }
+            return m;
         }
 
         int evaluateWhite(Board board) {

@@ -7,9 +7,9 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.util.function.Consumer;
 
-/**
- * The "Load/Analyze PGN" popup: a text area for the pasted game and the buttons "Load" and "Analysis".
- * The text is parsed here, so a game that cannot be read is reported inside the popup and nothing is closed.
+/*
+  The "Load/Analyze PGN" popup: a text area for the pasted game and the buttons "Load" and "Analysis".
+  The text is parsed here, so a game that cannot be read is reported inside the popup and nothing is closed.
  */
 @SuppressWarnings("serial")
 public class PgnDialog extends JDialog {
@@ -17,9 +17,9 @@ public class PgnDialog extends JDialog {
     private final JTextArea text = new JTextArea(16, 56);
     private final JLabel message = new JLabel(" ");
 
-    /**
-     * @param onLoad     receives the parsed game when the user presses "Load"
-     * @param onAnalysis receives the parsed game when the user presses "Analysis"
+    /*
+      @param onLoad     receives the parsed game when the user presses "Load"
+      @param onAnalysis receives the parsed game when the user presses "Analysis"
      */
     public PgnDialog(Frame owner, Consumer<PgnGame> onLoad, Consumer<PgnGame> onAnalysis) {
         super(owner, "Load/Analyze PGN", true);

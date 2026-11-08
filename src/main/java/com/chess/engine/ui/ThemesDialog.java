@@ -18,7 +18,7 @@ public class ThemesDialog {
     private ThemesDialog() {
     }
 
-    /** Opens the window (modal). {@code onSaved} runs after the new theme has been saved. */
+    /* Opens the window (modal). {@code onSaved} runs after the new theme has been saved. */
     public static void open(Window owner, Runnable onSaved) {
         JDialog dialog = new JDialog(owner, "Themes", Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -51,7 +51,7 @@ public class ThemesDialog {
     static final Color CANCEL_GRAY = new Color(66, 64, 61);
     static final Color CANCEL_GRAY_HOVER = new Color(82, 80, 76);
 
-    /** The whole content of the window (public so it can be embedded or rendered on its own). */
+    /* The whole content of the window (public so it can be embedded or rendered on its own). */
     public static class ThemesPanel extends JPanel {
 
         private Themes.BoardTheme pendingBoard = Themes.getBoard();

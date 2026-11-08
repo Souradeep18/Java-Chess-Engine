@@ -41,6 +41,14 @@ public class ChessBoardPanel extends JPanel {
     private static final Color CHECKER_COLOR =
             new Color(235, 130, 130);
 
+    // Highlight of the last move played on this board and an optional hint square
+    private static final Color LAST_MOVE_LIGHT = new Color(205, 210, 106);
+    private static final Color LAST_MOVE_DARK = new Color(170, 162, 58);
+    private static final Color HINT_COLOR = new Color(74, 163, 242);
+    private int lastFrom = -1;
+    private int lastTo = -1;
+    private int hintSquare = -1;
+
     private final SquareButton[] squares = new SquareButton[64];
 
     private Board board;
@@ -311,6 +319,10 @@ public class ChessBoardPanel extends JPanel {
                             selectedMove
                     );
 
+                    lastFrom = fromSquare;
+                    lastTo = square;
+                    hintSquare = -1;
+
                     refreshBoard();
 
                     firePropertyChange(
@@ -492,6 +504,37 @@ public class ChessBoardPanel extends JPanel {
         this.board = board.copy();
         selectedSquare = -1;
         highlightedMoves.clear();
+        lastFrom = -1;
+        lastTo = -1;
+        hintSquare = -1;
+        refreshBoard();
+    }
+
+    /* Highlights the squares of the last move (use -1, -1 to clear). */
+    public void setLastMove(int from, int to) {
+        this.lastFrom = from;
+        this.lastTo = to;
+        refreshBoard();
+    }
+
+    public void clearLastMove() {
+        setLastMove(-1, -1);
+    }
+
+    /* Marks one square as a hint (use -1 to clear). */
+    public void setHintSquare(int square) {
+        this.hintSquare = square;
+        refreshBoard();
+    }
+
+    /* Plays a legal move on this board from code (no "boardMove" event) and highlights it. */
+    public void playMove(Move move) {
+        MoveGenerator.makeMove(board, move);
+        selectedSquare = -1;
+        highlightedMoves.clear();
+        lastFrom = move.from;
+        lastTo = move.to;
+        hintSquare = -1;
         refreshBoard();
     }
 
@@ -586,12 +629,20 @@ public class ChessBoardPanel extends JPanel {
                         pieceSet.isClassic() ? pieceSymbol(board.getPiece(square)) : ""
                 );
 
+                if (square == lastFrom || square == lastTo) {
+                    button.setBackground((rank + file) % 2 == 0 ? LAST_MOVE_DARK : LAST_MOVE_LIGHT);
+                }
+
+                if (square == hintSquare) {
+                    button.setBackground(HINT_COLOR);
+                }
+
                 if (square == selectedSquare) {
                     button.setBackground(SELECTED_COLOR);
                 }
 
                 /*
-                 * Dot / Capture ring overlays
+                  Dot / Capture ring overlays
                  */
                 if (highlightedMoves.containsKey(square)) {
 
