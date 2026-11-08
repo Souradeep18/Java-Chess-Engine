@@ -2798,6 +2798,13 @@ public class ChessFrame extends JFrame {
         html.append("</body></html>");
         notationPane.setText(html.toString());
         notationPane.setCaretPosition(0);
+        // make sure the move numbers are laid out and painted right after the text was replaced
+        notationPane.revalidate();
+        notationPane.repaint();
+        SwingUtilities.invokeLater(() -> {
+            notationPane.revalidate();
+            notationPane.repaint();
+        });
     }
 
     private void renderMoveTreeHTML(MoveNode node, StringBuilder html, boolean isMainLine) {

@@ -2,8 +2,6 @@ package com.chess.engine.ui;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.text.html.HTMLEditorKit;
-import javax.swing.text.html.StyleSheet;
 import java.awt.*;
 import java.util.List;
 
@@ -32,7 +30,7 @@ public class LearnPanel extends JPanel {
         setBackground(UiKit.BG);
         setBorder(new EmptyBorder(18, 22, 18, 22));
 
-        //  left: table of contents
+        //left: table of contents
         menu.setLayout(new BoxLayout(menu, BoxLayout.Y_AXIS));
         menu.setOpaque(false);
         menuButtons = new UiKit.FlatButton[lessons.size()];
@@ -68,7 +66,7 @@ public class LearnPanel extends JPanel {
         menuWrap.setPreferredSize(new Dimension(290, 600));
         add(menuWrap, BorderLayout.WEST);
 
-        // centre: lesson text
+        //  centre: lesson text
         JPanel centre = UiKit.darkPanel(new BorderLayout(0, 8));
         centre.setBorder(new EmptyBorder(18, 24, 14, 24));
         JPanel head = new JPanel();
@@ -82,14 +80,8 @@ public class LearnPanel extends JPanel {
         head.add(Box.createVerticalStrut(10));
         centre.add(head, BorderLayout.NORTH);
 
-        HTMLEditorKit kit = new HTMLEditorKit();
-        StyleSheet css = new StyleSheet();
-        css.addRule("body { font-family: SansSerif; font-size: 15px; color: #d0d0d0; }");
-        css.addRule("p { margin-top: 0; margin-bottom: 10px; }");
-        css.addRule("li { margin-bottom: 6px; }");
-        css.addRule("b { color: #ffffff; }");
-        kit.setStyleSheet(css);
-        text.setEditorKit(kit);
+        // NOTE: HTMLEditorKit.setStyleSheet() would change the default style sheet of every HTML pane in the
+        // program (it is shared), so the lesson style is written inline in each lesson's HTML instead.
         text.setContentType("text/html");
         text.setEditable(false);
         text.setOpaque(false);
@@ -111,7 +103,7 @@ public class LearnPanel extends JPanel {
         centre.add(nav, BorderLayout.SOUTH);
         add(centre, BorderLayout.CENTER);
 
-        // right: boards
+        //right: boards
         boards.setLayout(new BoxLayout(boards, BoxLayout.Y_AXIS));
         boards.setOpaque(false);
         JPanel boardsHolder = new JPanel(new BorderLayout());
@@ -142,7 +134,9 @@ public class LearnPanel extends JPanel {
         LessonData.Lesson ls = lessons.get(index);
         sectionLabel.setText(ls.section.toUpperCase());
         titleLabel.setText(ls.title);
-        text.setText("<html><body>" + ls.html + "</body></html>");
+        text.setText("<html><head><style>body { font-family: SansSerif; font-size: 15px; color: #d0d0d0; } "
+                + "p { margin-top: 0; margin-bottom: 10px; } li { margin-bottom: 6px; } b { color: #ffffff; }"
+                + "</style></head><body>" + ls.html + "</body></html>");
         text.setCaretPosition(0);
 
         boards.removeAll();
