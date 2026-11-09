@@ -39,7 +39,6 @@ public class ThemesDialog {
         dialog.setVisible(true);
     }
 
-    // =====================================================================================
 
     static final Color BG = new Color(38, 36, 33);
     static final Color TILE_BG = new Color(52, 50, 47);
@@ -73,7 +72,7 @@ public class ThemesDialog {
             setLayout(new BorderLayout(28, 0));
             setBorder(BorderFactory.createEmptyBorder(26, 30, 26, 30));
 
-            // ---------- left: header, tabs, grids, buttons ----------
+            //  left: header, tabs, grids, buttons 
             JPanel left = new JPanel(new BorderLayout(0, 12));
             left.setOpaque(false);
 
@@ -131,7 +130,7 @@ public class ThemesDialog {
             left.add(buttons, BorderLayout.SOUTH);
             left.setPreferredSize(new Dimension(560, 600));
 
-            // ---------- right: sample board ----------
+            //  right: sample board
             JPanel right = new JPanel(new BorderLayout());
             right.setOpaque(false);
             right.add(preview, BorderLayout.NORTH);
@@ -143,7 +142,7 @@ public class ThemesDialog {
             showTab("Boards");
         }
 
-        // ---------- tabs ----------
+        // tabs
 
         private void showTab(String name) {
             activeTab = name;
@@ -178,7 +177,7 @@ public class ThemesDialog {
             }
         }
 
-        // ---------- grids ----------
+        // grids
 
         private JScrollPane scroll(JPanel grid) {
             JScrollPane sp = new JScrollPane(grid, ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS,
@@ -303,9 +302,9 @@ public class ThemesDialog {
             preview.repaint();
         }
 
-        // ---------- shared drawing ----------
+        // shared drawing 
 
-        /** A 2 x 2 mini board (light top-left), rounded corners. */
+        /* A 2 x 2 mini board (light top-left), rounded corners. */
         static void paintMiniBoard(Graphics2D g, int x, int y, int w, int h, Color light, Color dark) {
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -320,7 +319,7 @@ public class ThemesDialog {
             g2.dispose();
         }
 
-        // ---------- tiles ----------
+        //  tiles 
 
         private abstract class Tile extends JComponent {
             private final Runnable onClick;
@@ -396,7 +395,7 @@ public class ThemesDialog {
             }
         }
 
-        // ---------- the sample board on the right ----------
+        //  the sample board on the right 
 
         private class PreviewBoard extends JComponent {
             @Override
@@ -437,9 +436,8 @@ public class ThemesDialog {
         }
     }
 
-    // =====================================================================================
 
-    /** A flat rounded button (the system look and feel would ignore the colours). */
+    /* A flat rounded button (the system look and feel would ignore the colours). */
     static class FlatButton extends JButton {
         private final Color normal;
         private final Color hover;

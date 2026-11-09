@@ -81,7 +81,7 @@ public class PuzzlePanel extends JPanel implements PuzzleSession.Listener {
         updateRules();
     }
 
-    // Called when the screen is shown. 
+    // Called when the screen is shown.
     // Called after the theme was changed in the Themes window.
     public void applyTheme() {
         board.applyTheme();
@@ -89,6 +89,10 @@ public class PuzzlePanel extends JPanel implements PuzzleSession.Listener {
 
     public void activate() {
         if (!started) {
+            themeKeys = PuzzleLibrary.themes(8);
+            for (String t : themeKeys) {
+                themeBox.addItem(PuzzleLibrary.label(t) + "  (" + PuzzleLibrary.count(t) + ")");
+            }
             started = true;
             loadNext();
         }
@@ -118,10 +122,7 @@ public class PuzzlePanel extends JPanel implements PuzzleSession.Listener {
         setup.add(difficultyBar);
         setup.add(rulesLabel);
         themeBox.setFont(UiKit.font(Font.PLAIN, 14));
-        themeKeys = PuzzleLibrary.themes(8);
-        for (String t : themeKeys) {
-            themeBox.addItem(PuzzleLibrary.label(t) + "  (" + PuzzleLibrary.count(t) + ")");
-        }
+        PuzzleLibrary.preload();     // the puzzles load in the background; the theme list is filled when the screen opens
         themeBox.addActionListener(e -> {
             if (started) loadNext();
         });
@@ -229,7 +230,7 @@ public class PuzzlePanel extends JPanel implements PuzzleSession.Listener {
         session.start(p);
     }
 
-    //PuzzleSession.Listener
+    // PuzzleSession.Listener
 
     @Override
     public void onMove(String san, boolean whiteMoved) {
@@ -290,7 +291,7 @@ public class PuzzlePanel extends JPanel implements PuzzleSession.Listener {
         return sb.toString();
     }
 
-    /* The round king / tick / cross icon beside the prompt. */
+    // The round king / tick / cross icon beside the prompt. 
     static final class PromptIcon extends JComponent {
         static final int TURN = 0, OK = 1, WRONG = 2;
         private int state = TURN;
