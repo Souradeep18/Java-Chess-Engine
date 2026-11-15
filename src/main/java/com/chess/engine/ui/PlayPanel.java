@@ -76,6 +76,47 @@ public class PlayPanel extends JPanel {
         board.addPropertyChangeListener("boardMove", this::onBoardMove);
         board.setMovesEnabled(false);
         statusLabel.setText("Press PLAY in the menu bar to start a game.");
+        MovePreferences.addChangeListener(() -> SwingUtilities.invokeLater(this::syncPremoves));
+    }
+
+    /** Premove time charge for the move being committed (-1: the real elapsed time). */
+    private long premoveCharge = -1;
+
+    /** Premoves are allowed for the human side while a game runs and Move Preferences allows them. */
+    private void syncPremoves() {
+        boolean on = MovePreferences.premovesEnabled() && !over && cfg != null;
+        board.setPremoveSide(on ? Boolean.valueOf(humanWhite) : null);
+    }
+
+    /**
+     * After the computer's reply: plays the oldest queued premove if it is still legal (otherwise all
+     * premoves are dropped). The move costs 0 s (single premove) or 0.1 s (multiple premoves) on the clock.
+     */
+    private void runPremove() {
+        if (over || !humanTurn()) return;
+        if (!MovePreferences.premovesEnabled()) {
+            board.clearPremoves();
+            return;
+        }
+        Move pm = board.pollPremove();
+        if (pm == null) return;
+        Board cur = board.getBoard();
+        Move legal = null;
+        for (Move c : MoveGenerator.generateLegalMoves(cur)) {
+            if (c.from == pm.from && c.to == pm.to && c.promotion == pm.promotion) {
+                legal = c;
+                break;
+            }
+        }
+        if (legal == null) {
+            board.clearPremoves();            // the opponent's move made it impossible
+            return;
+        }
+        Board before = cur.copy();
+        String san = ChessUtil.san(before, legal);
+        board.playMove(legal);
+        premoveCharge = MovePreferences.premoveCostMs();
+        commit(legal, san, before, true);
     }
 
     private JPanel playerBar(JLabel name, JLabel captured, ClockLabel clockLabel) {
@@ -187,6 +228,7 @@ public class PlayPanel extends JPanel {
 
         board.setFlipped(!humanWhite);
         board.setBoard(start);
+        syncPremoves();
         moves.reset(true, 1);
         resultPanel.setVisible(false);
         titleLabel.setText("vs Computer: " + EngineLevel.title(config.level));
@@ -225,13 +267,13 @@ public class PlayPanel extends JPanel {
         flipButton.setEnabled(true);
     }
 
-    // moves
+    // ------------------------------------------------------------------ moves
 
     private boolean humanTurn() {
         return positions.get(positions.size() - 1).isWhiteToMove() == humanWhite;
     }
 
-    /* True when the player's pieces are at the bottom of the board. */
+    /** True when the player's pieces are at the bottom of the board. */
     private boolean humanAtBottom() {
         return board.isFlipped() == !humanWhite;
     }
@@ -268,9 +310,11 @@ public class PlayPanel extends JPanel {
         int ply = positions.size() - 1;
         int mover = before.isWhiteToMove() ? 0 : 1;
         if (!cfg.unlimited) {
+            long charge = premoveCharge;
             if (ply == 2) clock.start(0);           // the clocks start once both sides have moved
-            else if (ply > 2) clock.moved(mover);
+            else if (ply > 2) clock.moved(mover, charge);
         }
+        premoveCharge = -1;
 
         takebackButton.setEnabled(true);
         updateBars();
@@ -282,6 +326,7 @@ public class PlayPanel extends JPanel {
         } else {
             engineThinking = false;
             board.setMovesEnabled(true);
+            runPremove();
         }
     }
 
@@ -329,10 +374,10 @@ public class PlayPanel extends JPanel {
         worker.execute();
     }
 
-    /*
-      How long the engine may think. A small share of its remaining time plus most of the increment, never
-      more than 1/25 of the clock (the full engine may extend a search to about twice the request), and a
-      very small budget when it is nearly out of time.
+    /**
+     * How long the engine may think. A small share of its remaining time plus most of the increment, never
+     * more than 1/25 of the clock (the full engine may extend a search to about twice the request), and a
+     * very small budget when it is nearly out of time.
      */
     private long thinkTime(long remaining) {
         if (cfg.unlimited) return 4000;
@@ -343,7 +388,7 @@ public class PlayPanel extends JPanel {
         return Math.max(10, Math.min(budget, 20_000));
     }
 
-    // end of game
+    //  end of game
 
     /* Returns true when the game is over. {@code mover} is the side that just moved (0 white, 1 black). */
     private boolean checkGameEnd(Board after, int mover) {
@@ -424,6 +469,7 @@ public class PlayPanel extends JPanel {
         clock.stop();
         stopEngine();
         board.setMovesEnabled(false);
+        syncPremoves();
         setControlsEnabled(false);
         resultTitle.setText(headline);
         resultTitle.setForeground(result > 0 ? UiKit.GOOD : result < 0 ? UiKit.BAD : UiKit.BRIGHT);
@@ -442,7 +488,7 @@ public class PlayPanel extends JPanel {
         }
     }
 
-    /* The computer accepts a draw when it is not clearly better (equal or worse material) after move 15. */
+    /** The computer accepts a draw when it is not clearly better (equal or worse material) after move 15. */
     private void offerDraw() {
         if (over) return;
         if (positions.size() < 30) {
@@ -465,7 +511,7 @@ public class PlayPanel extends JPanel {
         }
     }
 
-    // Takes back the player's last move (and the computer's reply).
+    /** Takes back the player's last move (and the computer's reply). */
     private void takeBack() {
         if (over || positions.size() < 2) return;
         generation++;
@@ -491,7 +537,7 @@ public class PlayPanel extends JPanel {
         if (humanTurn()) board.setMovesEnabled(true); else engineMove();
     }
 
-    // display
+    // ------------------------------------------------------------------ display
 
     private void tick() {
         updateClocks();
@@ -559,7 +605,7 @@ public class PlayPanel extends JPanel {
         updateClocks();
     }
 
-    // Shows the pieces each side has captured, and the material lead.
+    /* Shows the pieces each side has captured, and the material lead. */
     private void updateCaptured() {
         Board cur = positions.get(positions.size() - 1);
         int[] white = new int[6];

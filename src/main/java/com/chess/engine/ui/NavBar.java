@@ -9,9 +9,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /*
- The top navigation bar: PLAY, PUZZLES, LEARN and TOOLS.
- PLAY opens the "play against the computer" dialog; the other three open drop-down menus.
- The knight's-tour and settings buttons that used to sit beside the board now live under TOOLS.
+  The top navigation bar: PLAY, PUZZLES, LEARN and TOOLS.
+  PLAY opens the "play against the computer" dialog; the other three open drop-down menus.
+  The knight's-tour and settings buttons that used to sit beside the board now live under TOOLS.
  */
 @SuppressWarnings("serial")
 public class NavBar extends JPanel {
@@ -33,6 +33,7 @@ public class NavBar extends JPanel {
     private JPopupMenu openMenu;
     private NavButton openOwner;
     private NavButton active;
+    private NavButton toolsButton;
 
     public NavBar(Listener listener) {
         super(new FlowLayout(FlowLayout.LEFT, 4, 0));
@@ -58,18 +59,18 @@ public class NavBar extends JPanel {
             return m;
         });
 
-        NavButton tools = addButton("TOOLS", () -> {
+        toolsButton = addButton("TOOLS", () -> {
             JPopupMenu m = newMenu();
             m.add(item("Analysis Board", "Free board, engine analysis, PGN and FEN", null, listener::onAnalysisBoard));
             m.add(item("Knight's Tour", "The knight's tour puzzle", new KnightIcon(), listener::onKnightsTour));
-            m.add(item("Settings", "Themes: board colours and piece sets", new GearIcon(20, UiKit.TEXT), listener::onThemes));
+            m.add(item("Settings", "Themes and move preferences", new GearIcon(20, UiKit.TEXT), () -> showPopup(toolsButton, settingsMenu())));
             return m;
         });
 
         add(play);
         add(puzzles);
         add(learn);
-        add(tools);
+        add(toolsButton);
     }
 
     /** Highlights the section that is on screen (PLAY, PUZZLES, LEARN, TOOLS or none). */
@@ -118,10 +119,23 @@ public class NavBar extends JPanel {
         }
     }
 
+    /* TOOLS > Settings: Themes and Move Preferences. */
+    private JPopupMenu settingsMenu() {
+        JPopupMenu m = newMenu();
+        m.add(item("Themes", "Board colours and piece sets", null, listener::onThemes));
+        m.add(item("Move Preferences", "Auto-Queen, premoves, click or drag", null,
+                () -> MovePreferences.open(SwingUtilities.getWindowAncestor(NavBar.this))));
+        return m;
+    }
+
     private void showMenu(NavButton owner) {
         closeMenu();
         if (owner.factory == null) return;
-        JPopupMenu menu = owner.factory.create();
+        showPopup(owner, owner.factory.create());
+    }
+
+    private void showPopup(NavButton owner, JPopupMenu menu) {
+        closeMenu();
         openMenu = menu;
         openOwner = owner;
         owner.setOpenLook(true);

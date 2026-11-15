@@ -1,6 +1,6 @@
 package com.chess.engine.ui;
 
-//A two-sided chess clock with increment. Side 0 = white, 1 = black.
+/* A two-sided chess clock with increment. Side 0 = white, 1 = black. */
 public class GameClock {
 
     private final long[] remaining = new long[2];
@@ -45,6 +45,24 @@ public class GameClock {
     synchronized void moved(int mover) {
         if (running >= 0 && !unlimited) {
             remaining[running] -= (System.nanoTime() - lastNano) / 1_000_000L;
+            if (remaining[running] > 0) remaining[running] += increment;
+            if (remaining[running] < 0) remaining[running] = 0;
+        }
+        running = 1 - mover;
+        lastNano = System.nanoTime();
+    }
+
+    /*
+      Like {@link #moved(int)}, but the move is charged exactly {@code chargeMs} milliseconds, whatever time
+      really passed (used for premoves). The increment is still added.
+     */
+    synchronized void moved(int mover, long chargeMs) {
+        if (chargeMs < 0) {
+            moved(mover);
+            return;
+        }
+        if (running >= 0 && !unlimited) {
+            remaining[running] -= chargeMs;
             if (remaining[running] > 0) remaining[running] += increment;
             if (remaining[running] < 0) remaining[running] = 0;
         }

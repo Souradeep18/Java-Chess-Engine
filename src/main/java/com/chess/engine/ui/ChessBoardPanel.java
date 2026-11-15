@@ -10,7 +10,10 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +71,21 @@ public class ChessBoardPanel extends JPanel {
     private final Map<Integer, Move> highlightedMoves =
             new HashMap<>();
 
+    //  Move preferences: premoves and dragging (see MovePreferences)
+
+    private static final Color PREMOVE_DARK = new Color(40, 100, 170);
+    private static final Color PREMOVE_LIGHT = new Color(90, 150, 215);
+
+    /* Colour (true = white) whose premoves may be entered while the opponent is to move; null = no premoves. */
+    private Boolean premoveSide = null;
+    private final List<Move> premoves = new ArrayList<>();
+
+    private int dragFrom = -1;
+    private char dragPiece = '.';
+    private boolean dragging = false;
+    private Point dragStart;
+    private Point dragPoint;
+
     // Board editor support 
 
     /*
@@ -108,6 +126,26 @@ public class ChessBoardPanel extends JPanel {
         if (overlayPainter != null) {
             overlayPainter.paint(g, this);
         }
+        if (dragging && dragPoint != null && dragPiece != '.') {
+            int size = Math.max(10, Math.min(squares[0].getWidth(), squares[0].getHeight()));
+            int x = dragPoint.x - size / 2;
+            int y = dragPoint.y - size / 2;
+            Themes.PieceSet set = Themes.getPieces();
+            Graphics2D pg = (Graphics2D) g.create();
+            pg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            if (set != null && !set.isClassic()) {
+                set.paint(pg, dragPiece, x, y, size);
+            } else {
+                pg.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                pg.setFont(new Font("Segoe UI Symbol", Font.PLAIN, Math.round(size * 0.75f)));
+                FontMetrics fm = pg.getFontMetrics();
+                String sym = pieceSymbolRaw(dragPiece);   // plain glyph (pieceSymbol wraps it in HTML)
+                pg.setColor(Color.BLACK);
+                pg.drawString(sym, dragPoint.x - fm.stringWidth(sym) / 2,
+                        dragPoint.y + (fm.getAscent() - fm.getDescent()) / 2);
+            }
+            pg.dispose();
+        }
     }
 
     public ChessBoardPanel(Board board) {
@@ -131,6 +169,13 @@ public class ChessBoardPanel extends JPanel {
         );
 
         createBoard();
+
+        MovePreferences.addChangeListener(() -> SwingUtilities.invokeLater(() -> {
+            cancelDrag();
+            selectedSquare = -1;
+            highlightedMoves.clear();
+            refreshBoard();
+        }));
 
         refreshBoard();
     }
@@ -219,6 +264,15 @@ public class ChessBoardPanel extends JPanel {
             // Using ActionListener avoids duplicate mousePressed / mouseReleased triggers
             button.addActionListener(e -> handleSquareClick(currentSquare));
 
+            // Dragging a piece (when "Piece movement" allows it) and right click to cancel premoves
+            MouseAdapter dragAdapter = new MouseAdapter() {
+                @Override public void mousePressed(MouseEvent e) { handlePress(currentSquare, e); }
+                @Override public void mouseDragged(MouseEvent e) { handleDrag(e); }
+                @Override public void mouseReleased(MouseEvent e) { handleRelease(e); }
+            };
+            button.addMouseListener(dragAdapter);
+            button.addMouseMotionListener(dragAdapter);
+
             // Lets palette pieces be dragged onto this square (editor mode only)
             button.setTransferHandler(new SquareDropHandler(currentSquare));
 
@@ -268,14 +322,15 @@ public class ChessBoardPanel extends JPanel {
             return;
         }
 
-        if (!movesEnabled || isProcessingClick) {
+        if (!canMove() || isProcessingClick || !MovePreferences.allowsClick()) {
             return;
         }
 
         isProcessingClick = true;
 
         try {
-            char clickedPiece = board.getPiece(square);
+            Board pos = positionForMoves();
+            char clickedPiece = pos.getPiece(square);
 
             if (selectedSquare == -1) {
 
@@ -283,7 +338,7 @@ public class ChessBoardPanel extends JPanel {
                     return;
                 }
 
-                if (!isPieceOwnedBySideToMove(clickedPiece)) {
+                if (!isPieceOwnedBySideToMove(pos, clickedPiece)) {
                     return;
                 }
 
@@ -295,44 +350,18 @@ public class ChessBoardPanel extends JPanel {
             Move castleTarget = highlightedMoves.get(square);
             boolean castleOnRook = castleTarget != null && castleTarget.isCastle && board.isChess960();
 
-            if (clickedPiece != '.' && isPieceOwnedBySideToMove(clickedPiece) && !castleOnRook) {
+            boolean premoveRecapture = premoveMode() && highlightedMoves.containsKey(square);
+
+            if (clickedPiece != '.' && isPieceOwnedBySideToMove(pos, clickedPiece) && !castleOnRook
+                    && !premoveRecapture) {
                 selectPiece(square);
                 return;
             }
 
             // Check if destination square clicked is valid
             if (highlightedMoves.containsKey(square)) {
-
-                int fromSquare = selectedSquare;
-
-                selectedSquare = -1;
-                highlightedMoves.clear();
-
-                Move selectedMove = resolveMoveForSquare(fromSquare, square);
-
-                if (selectedMove != null) {
-
-                    Board before = board.copy();
-
-                    MoveGenerator.makeMove(
-                            board,
-                            selectedMove
-                    );
-
-                    lastFrom = fromSquare;
-                    lastTo = square;
-                    hintSquare = -1;
-
-                    refreshBoard();
-
-                    firePropertyChange(
-                            "boardMove",
-                            before,
-                            board.copy()
-                    );
-
-                    return;
-                }
+                playSelected(selectedSquare, square);
+                return;
             }
 
             selectedSquare = -1;
@@ -345,20 +374,308 @@ public class ChessBoardPanel extends JPanel {
     }
 
     /**
-     * Finds matching legal move. Prompts the user once if move requires pawn promotion.
+     * Plays (or, while the opponent is to move, queues as a premove) the move from the selected piece to a
+     * highlighted square. Used by clicking and by dropping a dragged piece.
      */
-    private Move resolveMoveForSquare(int fromSquare, int toSquare) {
-        List<Move> legalMoves = MoveGenerator.generateLegalMoves(board);
+    private void playSelected(int fromSquare, int square) {
+        boolean asPremove = premoveMode();
+        Board pos = positionForMoves();
 
-        char movingPiece = board.getPiece(fromSquare);
+        selectedSquare = -1;
+        highlightedMoves.clear();
+
+        Move selectedMove = resolveMoveForSquare(pos, fromSquare, square);
+
+        if (selectedMove == null) {
+            refreshBoard();
+            return;
+        }
+
+        if (asPremove) {
+            if (!MovePreferences.multiplePremoves()) {
+                premoves.clear();           // single premove: the new one replaces the old one
+            }
+            premoves.add(selectedMove);
+            refreshBoard();
+            return;
+        }
+
+        Board before = board.copy();
+
+        MoveGenerator.makeMove(
+                board,
+                selectedMove
+        );
+
+        lastFrom = fromSquare;
+        lastTo = square;
+        hintSquare = -1;
+
+        refreshBoard();
+
+        firePropertyChange(
+                "boardMove",
+                before,
+                board.copy()
+        );
+    }
+
+    // dragging 
+
+    private void handlePress(int square, MouseEvent e) {
+        if (editorMode) {
+            return;
+        }
+        if (SwingUtilities.isRightMouseButton(e)) {
+            // right click: forget the premoves and any selection
+            cancelDrag();
+            boolean had = !premoves.isEmpty() || selectedSquare != -1;
+            premoves.clear();
+            selectedSquare = -1;
+            highlightedMoves.clear();
+            if (had) refreshBoard();
+            return;
+        }
+        if (!SwingUtilities.isLeftMouseButton(e) || !canMove() || isProcessingClick || !MovePreferences.allowsDrag()) {
+            return;
+        }
+        Board pos = positionForMoves();
+        char piece = pos.getPiece(square);
+        if (piece == '.' || !isPieceOwnedBySideToMove(pos, piece)) {
+            return;
+        }
+        if (premoveMode() && selectedSquare != -1 && highlightedMoves.containsKey(square)) {
+            return;                  // a premoved recapture onto one's own piece: the click handler plays it
+        }
+        selectPiece(square);
+        dragFrom = square;
+        dragPiece = piece;
+        dragging = false;
+        dragStart = SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), this);
+        dragPoint = dragStart;
+    }
+
+    private void handleDrag(MouseEvent e) {
+        if (dragFrom < 0) {
+            return;
+        }
+        dragPoint = SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), this);
+        if (!dragging) {
+            if (dragStart.distance(dragPoint) < 5) {
+                return;
+            }
+            dragging = true;
+            refreshBoard();          // the piece leaves its square while it is carried
+        }
+        repaint();
+    }
+
+    private void handleRelease(MouseEvent e) {
+        if (dragFrom < 0) {
+            return;
+        }
+        int from = dragFrom;
+        boolean wasDragging = dragging;
+        Point where = SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), this);
+        cancelDrag();
+        if (!wasDragging) {
+            refreshBoard();          // plain press: the click handler does the rest
+            return;
+        }
+        int target = squareAt(where);
+        isProcessingClick = true;
+        try {
+            if (target >= 0 && target != from && highlightedMoves.containsKey(target) && selectedSquare == from) {
+                playSelected(from, target);
+            } else if (target != from) {
+                selectedSquare = -1;       // dropped somewhere that is not a legal square
+                highlightedMoves.clear();
+                refreshBoard();
+            } else {
+                refreshBoard();
+            }
+        } finally {
+            isProcessingClick = false;
+        }
+    }
+
+    private void cancelDrag() {
+        boolean was = dragging;
+        dragFrom = -1;
+        dragPiece = '.';
+        dragging = false;
+        dragStart = null;
+        dragPoint = null;
+        if (was) repaint();
+    }
+
+    /** The square under a point (panel coordinates), or -1. */
+    private int squareAt(Point p) {
+        for (int sq = 0; sq < 64; sq++) {
+            if (squares[sq].getBounds().contains(p)) {
+                return sq;
+            }
+        }
+        return -1;
+    }
+
+    // ----- premoves -----
+
+    /** True while the opponent is to move and the player may enter premoves. */
+    private boolean premoveMode() {
+        return !movesEnabled && premoveSide != null && !editorMode && board != null
+                && board.isWhiteToMove() != premoveSide;
+    }
+
+    private boolean canMove() {
+        return movesEnabled || premoveMode();
+    }
+
+    /**
+     * The position moves are taken from: the board itself, or while premoving a copy in which the player is
+     * to move and the queued premoves have been played.
+     */
+    private Board positionForMoves() {
+        if (!premoveMode()) {
+            return board;
+        }
+        Board v = board.copy();
+        v.setEnPassantSquare(-1);
+        v.setWhiteToMove(premoveSide);
+        for (Move m : premoves) {
+            MoveGenerator.makeMove(v, m);
+            v.setEnPassantSquare(-1);
+            v.setWhiteToMove(premoveSide);
+        }
+        return v;
+    }
+
+    /**
+     * The moves the player may choose from in {@code pos}. Normally the legal moves. While premoving, every
+     * piece may move as if the opponent's pieces (except the king) were not in the way: sliding pieces go
+     * past them, captures are allowed, pawns may push onto them, but never onto the player's own pieces.
+     * The king keeps to squares that are not attacked, so a premove never walks it into check.
+     */
+    private List<Move> movesFor(Board pos) {
+        List<Move> legal = MoveGenerator.generateLegalMoves(pos);
+        if (!premoveMode()) {
+            return legal;
+        }
+        List<Move> all = new ArrayList<>(legal);
+        Board open = pos.copy();
+        boolean white = pos.isWhiteToMove();
+        for (int sq = 0; sq < 64; sq++) {
+            char c = open.getPiece(sq);
+            if (c != '.' && Character.isUpperCase(c) != white && Character.toUpperCase(c) != 'K') {
+                open.setPiece(sq, '.');
+            }
+        }
+        open.setEnPassantSquare(-1);
+        for (Move m : MoveGenerator.generateLegalMoves(open)) {
+            char mover = pos.getPiece(m.from);
+            if (Character.toUpperCase(mover) == 'K') {
+                continue;                       // king moves come from the real position only
+            }
+            boolean known = false;
+            for (Move k : all) {
+                if (k.from == m.from && k.to == m.to && k.promotion == m.promotion) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                all.add(m);
+            }
+        }
+
+        /* Recaptures: a square holding one of the player's own pieces may be the target too, because the
+         opponent may capture that piece first (1.e4 c6 ... 4.f3 exf3 5.Nxf3). Played with the pieces
+         exchanged for enemy ones, so only real capturing moves of that kind are found. If the opponent
+         does not capture, the premove is simply dropped when its turn comes.*/
+        for (int from = 0; from < 64; from++) {
+            char mover = pos.getPiece(from);
+            if (mover == '.' || Character.isUpperCase(mover) != white || Character.toUpperCase(mover) == 'K') {
+                continue;
+            }
+            Board swap = open.copy();           // this piece stays; the player's other pieces become "enemies"
+            for (int sq = 0; sq < 64; sq++) {
+                char c = swap.getPiece(sq);
+                if (sq != from && c != '.' && Character.isUpperCase(c) == white && Character.toUpperCase(c) != 'K') {
+                    swap.setPiece(sq, Character.isUpperCase(c) ? Character.toLowerCase(c) : Character.toUpperCase(c));
+                }
+            }
+            swap.setEnPassantSquare(-1);
+            for (Move m : MoveGenerator.generatePseudoLegalMoves(swap)) {
+                char target = pos.getPiece(m.to);
+                if (m.from != from || target == '.' || Character.isUpperCase(target) != white
+                        || Character.toUpperCase(target) == 'K') {
+                    continue;
+                }
+                boolean known = false;
+                for (Move k : all) {
+                    if (k.from == m.from && k.to == m.to && k.promotion == m.promotion) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known) {
+                    all.add(m);
+                }
+            }
+        }
+        return all;
+    }
+
+    /**
+     * Allows premoves for one colour (true = white, false = black); null switches them off. Clears the queue.
+     */
+    public void setPremoveSide(Boolean white) {
+        premoveSide = white;
+        premoves.clear();
+        selectedSquare = -1;
+        highlightedMoves.clear();
+        refreshBoard();
+    }
+
+    public boolean hasPremoves() {
+        return !premoves.isEmpty();
+    }
+
+    /** Removes and returns the oldest queued premove, or null. */
+    public Move pollPremove() {
+        if (premoves.isEmpty()) {
+            return null;
+        }
+        Move m = premoves.remove(0);
+        refreshBoard();
+        return m;
+    }
+
+    public void clearPremoves() {
+        if (!premoves.isEmpty()) {
+            premoves.clear();
+            refreshBoard();
+        }
+    }
+
+    /*
+      Finds matching legal move. Prompts the user once if move requires pawn promotion.
+     */
+    private Move resolveMoveForSquare(Board pos, int fromSquare, int toSquare) {
+        List<Move> legalMoves = movesFor(pos);
+
+        char movingPiece = pos.getPiece(fromSquare);
         boolean isPawn = Character.toLowerCase(movingPiece) == 'p';
         int toRank = toSquare / 8;
-        boolean reachesPromotionRank = (board.isWhiteToMove() && toRank == 7) || (!board.isWhiteToMove() && toRank == 0);
+        boolean reachesPromotionRank = (pos.isWhiteToMove() && toRank == 7) || (!pos.isWhiteToMove() && toRank == 0);
 
         char chosenPromotion = '\0';
 
         if (isPawn && reachesPromotionRank) {
-            chosenPromotion = promptPromotionPiece(board.isWhiteToMove());
+            // Move Preferences > Auto-Queen: always a queen, no dialog
+            chosenPromotion = MovePreferences.isAutoQueen()
+                    ? (pos.isWhiteToMove() ? 'Q' : 'q')
+                    : promptPromotionPiece(pos.isWhiteToMove());
             if (chosenPromotion == '\0') {
                 return null; // Canceled selection
             }
@@ -416,7 +733,7 @@ public class ChessBoardPanel extends JPanel {
         selectedSquare = square;
         highlightedMoves.clear();
 
-        List<Move> legalMoves = MoveGenerator.generateLegalMoves(board);
+        List<Move> legalMoves = movesFor(positionForMoves());
 
         for (Move move : legalMoves) {
             if (move.from == square) {
@@ -427,14 +744,14 @@ public class ChessBoardPanel extends JPanel {
         refreshBoard();
     }
 
-    private boolean isPieceOwnedBySideToMove(char piece) {
+    private boolean isPieceOwnedBySideToMove(Board pos, char piece) {
 
         if (piece == '.') {
             return false;
         }
 
         boolean whitePiece = Character.isUpperCase(piece);
-        return whitePiece == board.isWhiteToMove();
+        return whitePiece == pos.isWhiteToMove();
     }
 
     public void setEditorMode(boolean enabled) {
@@ -504,13 +821,15 @@ public class ChessBoardPanel extends JPanel {
         this.board = board.copy();
         selectedSquare = -1;
         highlightedMoves.clear();
+        premoves.clear();
+        cancelDrag();
         lastFrom = -1;
         lastTo = -1;
         hintSquare = -1;
         refreshBoard();
     }
 
-    /* Highlights the squares of the last move (use -1, -1 to clear). */
+    /** Highlights the squares of the last move (use -1, -1 to clear). */
     public void setLastMove(int from, int to) {
         this.lastFrom = from;
         this.lastTo = to;
@@ -527,7 +846,7 @@ public class ChessBoardPanel extends JPanel {
         refreshBoard();
     }
 
-    /* Plays a legal move on this board from code (no "boardMove" event) and highlights it. */
+    /** Plays a legal move on this board from code (no "boardMove" event) and highlights it. */
     public void playMove(Move move) {
         MoveGenerator.makeMove(board, move);
         selectedSquare = -1;
@@ -566,9 +885,11 @@ public class ChessBoardPanel extends JPanel {
 
         highlightedMoves.clear();
 
-        if (selectedSquare != -1 && movesEnabled) {
+        final Board movePos = (selectedSquare != -1 && canMove()) ? positionForMoves() : board;
 
-            List<Move> legalMoves = MoveGenerator.generateLegalMoves(board);
+        if (selectedSquare != -1 && canMove()) {
+
+            List<Move> legalMoves = movesFor(movePos);
 
             for (Move move : legalMoves) {
                 if (move.from == selectedSquare) {
@@ -622,11 +943,12 @@ public class ChessBoardPanel extends JPanel {
 
                 Themes.PieceSet pieceSet = Themes.getPieces();
                 button.pieceSet = pieceSet;
-                button.piece = board.getPiece(square);
+                final boolean carried = dragging && square == dragFrom;   // lifted by the mouse
+                button.piece = carried ? '.' : board.getPiece(square);
                 button.mateMark = false;
 
                 button.setText(
-                        pieceSet.isClassic() ? pieceSymbol(board.getPiece(square)) : ""
+                        pieceSet.isClassic() && !carried ? pieceSymbol(board.getPiece(square)) : ""
                 );
 
                 if (square == lastFrom || square == lastTo) {
@@ -637,21 +959,27 @@ public class ChessBoardPanel extends JPanel {
                     button.setBackground(HINT_COLOR);
                 }
 
+                for (Move pm : premoves) {
+                    if (square == pm.from || square == pm.to) {
+                        button.setBackground((rank + file) % 2 == 0 ? PREMOVE_DARK : PREMOVE_LIGHT);
+                    }
+                }
+
                 if (square == selectedSquare) {
                     button.setBackground(SELECTED_COLOR);
                 }
 
                 /*
-                  Dot / Capture ring overlays
+                 * Dot / Capture ring overlays
                  */
                 if (highlightedMoves.containsKey(square)) {
 
-                    char destinationPiece = board.getPiece(square);
+                    char destinationPiece = movePos.getPiece(square);
 
                     Move highlighted = highlightedMoves.get(square);
                     boolean castleOnRook = highlighted != null && highlighted.isCastle && board.isChess960();
 
-                    if (destinationPiece != '.' && (isOpponentPiece(destinationPiece) || castleOnRook)) {
+                    if (destinationPiece != '.' && (isOpponentPiece(movePos, destinationPiece) || castleOnRook || premoveMode())) {
                         button.setLegalCaptureRing(true);
                     } else {
                         button.setLegalMoveDot(true);
@@ -701,13 +1029,13 @@ public class ChessBoardPanel extends JPanel {
         repaint();
     }
 
-    private boolean isOpponentPiece(char piece) {
+    private boolean isOpponentPiece(Board pos, char piece) {
 
         if (piece == '.') {
             return false;
         }
 
-        return Character.isUpperCase(piece) != board.isWhiteToMove();
+        return Character.isUpperCase(piece) != pos.isWhiteToMove();
     }
 
     private int findKing(Board position, boolean white) {
