@@ -69,6 +69,22 @@ public final class PgnGame {
         return getTag("Black", "Black");
     }
 
+    /**
+     * A game that was played in the program rather than read from text (for example against the computer).
+     * {@code sans} are the moves in algebraic notation; check signs are removed, as the parser does.
+     */
+    public static PgnGame of(Board startBoard, List<Move> moves, List<String> sans, Map<String, String> tags, String result) {
+        if (moves == null || moves.isEmpty()) {
+            throw new IllegalArgumentException("No moves were found in the game.");
+        }
+        List<String> plain = new ArrayList<>();
+        for (String san : sans) {
+            plain.add(san.replace("+", "").replace("#", ""));
+        }
+        return new PgnGame(new LinkedHashMap<>(tags), startBoard.copy(), new ArrayList<>(moves), plain,
+                result == null ? "*" : result);
+    }
+
     //  parsing
     // throws IllegalArgumentException with a readable message when the text is not a playable game 
     public static PgnGame parse(String text) {

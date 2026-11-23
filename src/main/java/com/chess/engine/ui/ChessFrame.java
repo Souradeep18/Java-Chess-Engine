@@ -28,10 +28,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Main application frame for the Java Chess Engine.
- * Features recursive variation trees, PGN HTML notation display,
- * material score tracking, engine search, and a full Board Editor mode.
+/*
+  Main application frame for the Java Chess Engine.
+  Features recursive variation trees, PGN HTML notation display,
+  material score tracking, engine search, and a full Board Editor mode.
  */
 @SuppressWarnings("serial")
 public class ChessFrame extends JFrame {
@@ -184,6 +184,9 @@ public class ChessFrame extends JFrame {
             @Override public void onThemes() { openThemes(); }
         });
         add(navBar, BorderLayout.NORTH);
+
+        // "Analysis Board" on the Play screen after a game: the game goes to the analysis board and is reviewed
+        playPanel.setAnalysisHandler(this::analysePlayedGame);
 
         // --- Side Control Panel ---
         JPanel sidePanel = new JPanel();
@@ -1894,9 +1897,82 @@ public class ChessFrame extends JFrame {
             gameAnalysisDialog.dispose();
         }
 
+        openGameReview(game);
+    }
+
+    private void openGameReview(PgnGame game) {
+        if (gameAnalysisDialog != null) {
+            gameAnalysisDialog.dispose();
+        }
+
         gameAnalysisDialog = new GameAnalysisDialog(this, game, this::showMainLinePosition);
         gameAnalysisDialog.setVisible(true);
         gameAnalysisDialog.start();
+    }
+
+    // --- Play screen -> analysis board ---
+
+    private static final String STANDARD_START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+    /*
+      The game just played on the Play screen goes to the analysis board (the final position is shown, "<" walks
+      back through the moves) and the game review (graph, accuracy, kinds of moves) opens, as for "Analyse" in
+      the PGN window. Review is offered for standard chess; variant games are only transferred.
+     */
+    private void analysePlayedGame(PlayPanel.GameRecord game) {
+        if (isEditorMode || knightsTour.isActive()) {
+            JOptionPane.showMessageDialog(this, "Leave the board editor and the Knight's Tour first.",
+                    "Analysis Board", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        showCard(CARD_ANALYSIS, "TOOLS");
+        stopAnalysis();
+
+        boolean standardStart = game.start.toFEN().equals(STANDARD_START_FEN);
+        MoveNode root = new MoveNode(game.start.copy(), null, standardStart ? "Start" : "FEN", 0);
+        MoveNode node = root;
+        try {
+            for (Move move : game.moves) {
+                Board after = node.board.copy();
+                MoveGenerator.makeMove(after, move);
+                node = findOrCreateChild(node, node.board, after, move);
+            }
+        } catch (RuntimeException ex) {
+            JOptionPane.showMessageDialog(this, "The game could not be transferred: " + ex.getMessage(),
+                    "Analysis Board", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        rootNode = root;
+        selectNode(node);
+
+        if (!game.standard) {
+            JOptionPane.showMessageDialog(this, "The game is on the analysis board. The game review is only offered for standard chess ("
+                    + game.variant + " was played).", "Analysis Board", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (game.moves.isEmpty()) {
+            return;
+        }
+
+        Map<String, String> tags = new LinkedHashMap<>();
+        tags.put("Event", "Game against the computer");
+        tags.put("Site", "Java Chess");
+        tags.put("Date", java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy.MM.dd")));
+        tags.put("White", game.white);
+        tags.put("Black", game.black);
+        tags.put("Result", game.result);
+        if (!standardStart) {
+            tags.put("SetUp", "1");
+            tags.put("FEN", game.start.toFEN());
+        }
+        try {
+            openGameReview(PgnGame.of(game.start, game.moves, game.san, tags, game.result));
+        } catch (RuntimeException ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(this, "The game is on the analysis board, but the review window could not be opened:\n"
+                    + ex.getMessage(), "Analysis Board", JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     /** Shows the position after {@code ply} moves of the main line (0 = the start). */
