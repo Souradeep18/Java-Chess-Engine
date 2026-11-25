@@ -1947,7 +1947,7 @@ public class ChessFrame extends JFrame {
         selectNode(node);
 
         if (!game.standard) {
-            JOptionPane.showMessageDialog(this, "The game is on the analysis board. The game review is only offered for standard chess ("
+            JOptionPane.showMessageDialog(this, "The game is on the analysis board. The game review is only offered for standard chess and Chess960 ("
                     + game.variant + " was played).", "Analysis Board", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
@@ -1962,6 +1962,9 @@ public class ChessFrame extends JFrame {
         tags.put("White", game.white);
         tags.put("Black", game.black);
         tags.put("Result", game.result);
+        if (!"Standard".equals(game.variant)) {
+            tags.put("Variant", game.variant);
+        }
         if (!standardStart) {
             tags.put("SetUp", "1");
             tags.put("FEN", game.start.toFEN());

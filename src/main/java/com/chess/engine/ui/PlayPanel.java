@@ -140,7 +140,7 @@ public class PlayPanel extends JPanel {
         });
     }
 
-    // looking at earlier positions
+    // ------------------------------------------------------------------ looking at earlier positions
 
     private boolean atLive() {
         return viewIndex == positions.size() - 1;
@@ -197,7 +197,7 @@ public class PlayPanel extends JPanel {
     /* Premove time charge for the move being committed (-1: the real elapsed time). */
     private long premoveCharge = -1;
 
-    /* Premoves are allowed for the human side while a game runs and Move Preferences allows them. */
+    /** Premoves are allowed for the human side while a game runs and Move Preferences allows them. */
     private void syncPremoves() {
         boolean on = MovePreferences.premovesEnabled() && !over && cfg != null && atLive();
         board.setPremoveSide(on ? Boolean.valueOf(humanWhite) : null);
@@ -380,7 +380,8 @@ public class PlayPanel extends JPanel {
     private GameRecord record() {
         String human = "You";
         String comp = "Computer - " + EngineLevel.title(cfg.level);
-        boolean standard = cfg.variant == PlayVariant.STANDARD;
+        // the game review works for standard chess and Chess960
+        boolean standard = cfg.variant == PlayVariant.STANDARD || cfg.variant == PlayVariant.CHESS960;
         return new GameRecord(positions.get(0).copy(), new ArrayList<>(played), new ArrayList<>(sanList),
                 humanWhite ? human : comp, humanWhite ? comp : human, over ? resultPgn : "*",
                 cfg.variant.label, standard);
@@ -449,7 +450,7 @@ public class PlayPanel extends JPanel {
         flipButton.setEnabled(true);
     }
 
-    //  moves
+    // moves
 
     private boolean humanTurn() {
         return positions.get(positions.size() - 1).isWhiteToMove() == humanWhite;
@@ -479,7 +480,7 @@ public class PlayPanel extends JPanel {
         commit(m, ChessUtil.san(before, m), before, after, true);
     }
 
-    // Records a move that has already been played on the board. 
+    /* Records a move that has already been played on the board. */
     private void commit(Move m, String san, Board before, Board after, boolean byHuman) {
         final boolean following = atLive();        // the player is looking at the live position
         char piece = before.getPiece(m.from);
@@ -565,10 +566,10 @@ public class PlayPanel extends JPanel {
         worker.execute();
     }
 
-    /*
-      How long the engine may think. A small share of its remaining time plus most of the increment, never
-      more than 1/25 of the clock (the full engine may extend a search to about twice the request), and a
-      very small budget when it is nearly out of time.
+    /**
+     * How long the engine may think. A small share of its remaining time plus most of the increment, never
+     * more than 1/25 of the clock (the full engine may extend a search to about twice the request), and a
+     * very small budget when it is nearly out of time.
      */
     private long thinkTime(long remaining) {
         if (cfg.unlimited) return 4000;
@@ -581,7 +582,7 @@ public class PlayPanel extends JPanel {
 
     //  end of game
 
-    // Returns true when the game is over. {@code mover} is the side that just moved (0 white, 1 black). 
+    /* Returns true when the game is over. {@code mover} is the side that just moved (0 white, 1 black). */
     private boolean checkGameEnd(Board after, int mover) {
         // variant wins first: a king blown up, three checks, a king on the hill or on the eighth rank, ...
         if (after.isAtomic()) {
@@ -642,7 +643,7 @@ public class PlayPanel extends JPanel {
         return false;
     }
 
-    // Ends the game with a winner: whiteWins is 1 when White won, -1 when Black won. 
+    /* Ends the game with a winner: whiteWins is 1 when White won, -1 when Black won. */
     private void decided(int whiteWins, String detail, boolean ignored) {
         boolean humanWon = (whiteWins > 0) == humanWhite;
         finish(humanWon ? 1 : -1, humanWon ? "You won" : "You lost", detail);
@@ -681,7 +682,7 @@ public class PlayPanel extends JPanel {
         }
     }
 
-    // The computer accepts a draw when it is not clearly better (equal or worse material) after move 15. 
+    /* The computer accepts a draw when it is not clearly better (equal or worse material) after move 15. */
     private void offerDraw() {
         if (over) return;
         if (positions.size() < 30) {
@@ -704,7 +705,7 @@ public class PlayPanel extends JPanel {
         }
     }
 
-    // Takes back the player's last move (and the computer's reply). 
+    /* Takes back the player's last move (and the computer's reply). */
     private void takeBack() {
         if (over || positions.size() < 2) return;
         generation++;
@@ -739,7 +740,7 @@ public class PlayPanel extends JPanel {
         if (humanTurn()) board.setMovesEnabled(true); else engineMove();
     }
 
-    // ------------------------------------------------------------------ display
+    //  display
 
     private void tick() {
         updateClocks();
@@ -811,7 +812,7 @@ public class PlayPanel extends JPanel {
         updateClocks();
     }
 
-    // Shows the pieces each side has captured, and the material lead. 
+    /* Shows the pieces each side has captured, and the material lead. */
     private void updateCaptured() {
         Board cur = positions.get(Math.min(viewIndex, positions.size() - 1));
         int[] white = new int[6];
